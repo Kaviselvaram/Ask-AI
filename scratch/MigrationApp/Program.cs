@@ -1,11 +1,14 @@
 using System;
 using Microsoft.Data.SqlClient;
+using dotenv.net;
 
 class RAGAdvancedMigration
 {
     static void Main()
     {
-        string connectionString = "Server=tcp:aistart-sql-server.database.windows.net,1433;Initial Catalog=AIChatDB;Persist Security Info=False;User ID=kaviselvaram;Password=Vk642004@kavi;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;";
+        DotEnv.Load(options: new DotEnvOptions(envFilePaths: new[] { "/Users/kaviselvaramkathirvel/Desktop/AIstart/backend/.env" }));
+        string connectionString = Environment.GetEnvironmentVariable("SQL_CONNECTION_STRING")! + ";Pooling=false";
+        
         using SqlConnection conn = new SqlConnection(connectionString);
         conn.Open();
 
