@@ -1,0 +1,1 @@
+Extract 1-3 comma-separated keyword entities from this query to search in a knowledge graph. Output ONLY the keywords. Query: {{$input}}

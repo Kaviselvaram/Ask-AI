@@ -1,0 +1,8 @@
+Extract key entities (People, Organizations, Projects, Products, Departments, Locations, Contracts, Dates, Financial Entities) and their relationships from the following document summary. 
+Return ONLY valid JSON in this exact format:
+{
+    "entities": [ {"name": "John Doe", "type": "Person"} ],
+    "relationships": [ {"source": "John Doe", "target": "Sales Dept", "relation": "Works In"} ]
+}
+Document Summary:
+{{$input}}

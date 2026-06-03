@@ -1,0 +1,2 @@
+Rewrite the following user query to be highly optimized for vector semantic search. Expand acronyms, add missing context if obvious, and clarify intent. Output ONLY the rewritten query text.
+User Query: {{$input}}
