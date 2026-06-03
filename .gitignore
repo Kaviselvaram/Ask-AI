@@ -14,7 +14,7 @@ venv/
 
 # Environment Variables
 .env
-.env.*
+.env.local
 frontend/.env
 backend/.env
 
@@ -40,7 +40,7 @@ TestResults/
 
 # Environment Variables
 .env
-.env.*
+.env.local
 
 # Node
 node_modules/
