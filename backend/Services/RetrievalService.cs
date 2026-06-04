@@ -71,8 +71,7 @@ namespace backend.Services
             }
 
             using SqlDataReader reader = await command.ExecuteReaderAsync();
-            var chunks = new List<(string Text, double Score)>();
-            var sources = new List<SourceInfo>();
+            var chunksData = new List<(string Text, double Score, int DocId, string FileName, int PageNumber)>();
 
             while (await reader.ReadAsync())
             {
@@ -90,14 +89,7 @@ namespace backend.Services
                         continue;
 
                     double similarity = CosineSimilarity(questionEmbedding, chunkEmbedding);
-
-                    string formattedChunk = $"[Source: {fileName} | Page: {pageNumber}]\n{chunkText}";
-                    chunks.Add((formattedChunk, similarity));
-
-                    if (docId != 0 && fileName != "Unknown")
-                    {
-                        sources.Add(new SourceInfo(docId, fileName, pageNumber, $"/download/{docId}"));
-                    }
+                    chunksData.Add((chunkText, similarity, docId, fileName, pageNumber));
                 }
                 catch
                 {
@@ -105,11 +97,52 @@ namespace backend.Services
                 }
             }
 
-            var topChunks = chunks.OrderByDescending(x => x.Score).Take(5).ToList();
-            double avgScore = topChunks.Any() ? topChunks.Average(x => x.Score) : 0;
+            var filteredChunks = chunksData.Where(x => x.Score > 0.70).OrderByDescending(x => x.Score).Take(5).ToList();
+            
+            var sources = new List<SourceInfo>();
+            var finalChunks = new List<string>();
+            int totalPageRefs = 0;
+
+            foreach (var chunk in filteredChunks)
+            {
+                if (chunk.DocId == 0 || chunk.FileName == "Unknown") continue;
+
+                var existingSource = sources.FirstOrDefault(s => s.DocumentId == chunk.DocId);
+                int currentRefId;
+
+                if (existingSource == null)
+                {
+                    if (sources.Count >= 3) continue; // Max 3 source documents
+                    
+                    currentRefId = sources.Count + 1;
+                    existingSource = new SourceInfo
+                    {
+                        ReferenceId = currentRefId,
+                        DocumentId = chunk.DocId,
+                        FileName = chunk.FileName,
+                        DownloadUrl = $"/download/{chunk.DocId}"
+                    };
+                    sources.Add(existingSource);
+                }
+                else
+                {
+                    currentRefId = existingSource.ReferenceId;
+                }
+
+                if (totalPageRefs < 5 && !existingSource.Pages.Contains(chunk.PageNumber))
+                {
+                    existingSource.Pages.Add(chunk.PageNumber);
+                    totalPageRefs++;
+                }
+
+                string formattedChunk = $"[Source {currentRefId}: {chunk.FileName} | Page: {chunk.PageNumber}]\n{chunk.Text}";
+                finalChunks.Add(formattedChunk);
+            }
+
+            double avgScore = filteredChunks.Any() ? filteredChunks.Average(x => x.Score) : 0;
             double confidence = avgScore * 100.0;
 
-            return (topChunks.Select(x => x.Text).ToList(), sources.Distinct().ToList(), confidence);
+            return (finalChunks, sources, confidence);
         }
     }
 }

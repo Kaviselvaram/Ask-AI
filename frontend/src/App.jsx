@@ -466,10 +466,8 @@ function App() {
                                   rel="noopener noreferrer"
                                   style={{ color: "inherit", textDecoration: "none" }}
                                 >
-                                  📄 {source.fileName}
+                                  [{source.referenceId}] {source.fileName} ({source.formattedPages})
                                 </a>
-                                {" "}
-                                (Page {source.pageNumber})
                               </div>
                             ))}
                           </div>
