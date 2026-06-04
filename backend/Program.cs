@@ -305,7 +305,7 @@ float[] currentEmbedding =
     embedding.Vector.ToArray();
 
 Console.WriteLine("ABOUT TO RETRIEVE RELEVANT CHUNKS");
-var (relevantChunks, confidenceScore) =
+var (relevantChunks,sources, confidenceScore) =
         GetRelevantChunks(
             currentEmbedding,
             connection,
@@ -605,6 +605,7 @@ Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
     return Results.Ok(new
     {
         result = fullResponse,
+        sources = sources,
         chunksRetrieved = relevantChunks.Count,
         similarityScore = confidenceScore / 100.0
     });
@@ -983,106 +984,125 @@ double CosineSimilarity(
             *
             Math.Sqrt(magnitudeB)
         );
-}
-(List<string> Chunks, double ConfidenceScore) GetRelevantChunks(
-    float[] questionEmbedding,
-    SqlConnection connection,
-    int? documentId
-)
-{
-    Console.WriteLine($"ENTERING GetRelevantChunks. Embedding length: {questionEmbedding.Length}, DocumentId: {documentId}");
-    string sql =
-        @"SELECT
-            c.ChunkText,
-            c.Embedding,
-            (SELECT TOP 1 d2.FileName FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as FileName,
-            (SELECT TOP 1 m2.PageNumber FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as PageNumber
-          FROM Chunks c
-          WHERE EXISTS (
-              SELECT 1 FROM DocumentChunkMapping m 
-              JOIN Documents d ON m.DocumentId = d.Id 
-              WHERE m.ChunkId = c.Id AND d.Status = 'Latest' ";
-
-    if (documentId.HasValue)
-    {
-        sql += " AND d.Id = @DocumentId ";
     }
-    
-    sql += ")";
-
-    using SqlCommand command =
-        new SqlCommand(
-            sql,
-            connection
-        );
-
-    if (documentId.HasValue)
+    (List<string> Chunks,List<SourceInfo> Sources, double ConfidenceScore) GetRelevantChunks(
+        float[] questionEmbedding,
+        SqlConnection connection,
+        int? documentId
+    )
     {
-        command.Parameters.AddWithValue(
-            "@DocumentId",
-            documentId.Value
-        );
-    }
+        Console.WriteLine($"ENTERING GetRelevantChunks. Embedding length: {questionEmbedding.Length}, DocumentId: {documentId}");
+        string sql =
+            @"SELECT
+                c.ChunkText,
+                c.Embedding,
+                (SELECT TOP 1 d2.FileName FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as FileName,
+                (SELECT TOP 1 m2.PageNumber FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as PageNumber
+            FROM Chunks c
+            WHERE EXISTS (
+                SELECT 1 FROM DocumentChunkMapping m 
+                JOIN Documents d ON m.DocumentId = d.Id 
+                WHERE m.ChunkId = c.Id AND d.Status = 'Latest' ";
 
-    using SqlDataReader reader =
-        command.ExecuteReader();
-
-    var chunks =
-        new List<(string Text,double Score)>();
-
-    while (reader.Read())
-    {
-        try
+        if (documentId.HasValue)
         {
-            string chunkText =
-                reader.GetString(0);
+            sql += " AND d.Id = @DocumentId ";
+        }
+        
+        sql += ")";
 
-            string embeddingText =
-                reader.GetString(1);
+        using SqlCommand command =
+            new SqlCommand(
+                sql,
+                connection
+            );
 
-            string fileName =
-                reader.GetString(2);
-
-            int pageNumber = reader.IsDBNull(3) ? 1 : reader.GetInt32(3);
-
-            float[] chunkEmbedding =
-                embeddingText
-                    .Split(',')
-                    .Select(float.Parse)
-                    .ToArray();
-
-            if (chunkEmbedding.Length != questionEmbedding.Length)
-            {
-                continue;
-            }
-
-            double similarity =
-                CosineSimilarity(
-                    questionEmbedding,
-                    chunkEmbedding
-                );
-
-            string formattedChunk = $"[Source: {fileName} | Page: {pageNumber}]\n{chunkText}";
-
-            chunks.Add(
-                (
-                    formattedChunk,
-                    similarity
-                )
+        if (documentId.HasValue)
+        {
+            command.Parameters.AddWithValue(
+                "@DocumentId",
+                documentId.Value
             );
         }
-        catch (Exception ex)
+
+        using SqlDataReader reader =
+            command.ExecuteReader();
+
+        var chunks =
+            new List<(string Text,double Score)>();
+        var sources =
+            new List<SourceInfo>();
+
+        while (reader.Read())
         {
-            Console.WriteLine($"Error reading chunk: {ex.Message}");
-            continue;
+            try
+            {
+                string chunkText =
+                    reader.GetString(0);
+
+                string embeddingText =
+                    reader.GetString(1);
+
+                string fileName =
+                    reader.GetString(2);
+
+                int pageNumber = reader.IsDBNull(3) ? 1 : reader.GetInt32(3);
+
+                float[] chunkEmbedding =
+                    embeddingText
+                        .Split(',')
+                        .Select(float.Parse)
+                        .ToArray();
+
+                if (chunkEmbedding.Length != questionEmbedding.Length)
+                {
+                    continue;
+                }
+
+                double similarity =
+                    CosineSimilarity(
+                        questionEmbedding,
+                        chunkEmbedding
+                    );
+
+                string formattedChunk = $"[Source: {fileName} | Page: {pageNumber}]\n{chunkText}";
+
+                chunks.Add(
+                    (
+                        formattedChunk,
+                        similarity
+                    )
+                );
+                sources.Add(
+                    new SourceInfo(
+                        fileName,
+                        pageNumber
+                    )
+                );
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error reading chunk: {ex.Message}");
+                continue;
+            }
         }
+
+        var topChunks = chunks.OrderByDescending(x => x.Score).Take(5).ToList();
+        double avgScore = topChunks.Any() ? topChunks.Average(x => x.Score) : 0;
+        double confidence = avgScore * 100.0;
+
+        return (
+            topChunks.Select(x => x.Text).ToList(),
+            sources
+                .Distinct()
+                .ToList(),
+            confidence
+        );
     }
+    record ChatRequest(string message, int? documentId, double? temperature, int? maxTokens, double? topP);
 
-    var topChunks = chunks.OrderByDescending(x => x.Score).Take(5).ToList();
-    double avgScore = topChunks.Any() ? topChunks.Average(x => x.Score) : 0;
-    double confidence = avgScore * 100.0;
-
-    return (topChunks.Select(x => x.Text).ToList(), confidence);
-}
-record ChatRequest(string message, int? documentId, double? temperature, int? maxTokens, double? topP);
+    record SourceInfo(
+    string FileName,
+    int PageNumber
+);
 

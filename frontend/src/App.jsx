@@ -220,13 +220,17 @@ function App() {
       setRetrievalState(null);
 
       const finalText = res.data.result;
+      const sources = res.data.sources || [];
       let currentText = "";
 
       const aiMessage = {
         role: "assistant",
         content: "",
+        sources: res.data.sources || [],
         chunksRetrieved: res.data.chunksRetrieved || 0,
-        similarityScore: res.data.similarityScore ? res.data.similarityScore.toFixed(2) : "0.00"
+        similarityScore: res.data.similarityScore
+          ? res.data.similarityScore.toFixed(2)
+          : "0.00"
       };
 
       setChats(prev =>
@@ -444,6 +448,26 @@ function App() {
                     {msg.role === "assistant" ? (
                       <>
                         <ReactMarkdown>{msg.content}</ReactMarkdown>
+
+                        {msg.sources?.length > 0 && (
+                          <div className="sources-section">
+                            <div className="sources-title">
+                              📚 Sources
+                            </div>
+
+                            {msg.sources.map((source, index) => (
+                              <div
+                                key={index}
+                                className="source-item"
+                              >
+                                📄 {source.fileName}
+                                {" "}
+                                (Page {source.pageNumber})
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
                         {(msg.chunksRetrieved > 0) && (
                           <div className="retrieval-metadata">
                             <span>📄 Semantic Vault</span>
