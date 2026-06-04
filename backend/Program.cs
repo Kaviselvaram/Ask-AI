@@ -65,7 +65,11 @@ builder.Services.AddCors();
 
 builder.Services.AddScoped<IIntentClassifier, IntentClassifier>();
 builder.Services.AddScoped<IPlannerService, PlannerService>();
-builder.Services.AddScoped<IMemoryService, MemoryService>();
+builder.Services.AddScoped<IMemoryService>(sp => {
+    string connStr = Environment.GetEnvironmentVariable("SQL_CONNECTION_STRING")! + ";Pooling=false";
+    var kernel = sp.GetRequiredService<Kernel>();
+    return new MemoryService(connStr, kernel);
+});
 builder.Services.AddSingleton<RetrievalStrategyFactory>();
 
 //
