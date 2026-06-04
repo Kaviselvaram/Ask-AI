@@ -357,13 +357,12 @@ Console.WriteLine($"RETRIEVED {relevantChunks.Count} RELEVANT CHUNKS WITH CONFID
     string confidenceWarning = "";
     if (confidenceScore < 40 && relevantChunks.Any())
     {
-        confidenceWarning = $"\n\n> [!WARNING]\n> **Confidence: Low. Verification recommended.** I found limited information related to your question. Based on the available document...";
+        confidenceWarning = $"\n\nConfidence: Low. Verification recommended.";
     }
     else if (confidenceScore >= 40 && confidenceScore <= 60)
     {
-        confidenceWarning = $"\n\n> [!NOTE]\n> **Confidence: Medium**";
+        confidenceWarning = $"\n\nConfidence: Medium";
     }
-    // If > 60%, do not show warning
 
     string context = kgContext +
         string.Join(
