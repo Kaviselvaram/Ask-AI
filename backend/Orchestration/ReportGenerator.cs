@@ -19,10 +19,10 @@ namespace backend.Orchestration
         {
             Console.WriteLine("[Report Generator] Generating final report");
 
-            if (state.Evidence == null || state.Evidence.Count == 0 || state.GlobalConfidenceScore < 30)
+            if (state.Evidence == null || state.Evidence.Count == 0)
             {
-                state.FinalReport = "Insufficient supporting evidence found in the knowledge base.";
-                return;
+                Console.WriteLine("[Report Generator] Warning: No evidence retrieved.");
+                if (state.Evidence == null) state.Evidence = new List<EvidenceNode>();
             }
 
             string agentFindings = string.Join("\n\n", state.Evidence.Where(e => !string.IsNullOrEmpty(e.Findings)).Select(e => $"[{e.SourceAgent.ToUpper()}]\n{e.Findings}"));

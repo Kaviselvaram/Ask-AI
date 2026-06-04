@@ -291,10 +291,12 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
     
     // Override default intent strategy chunk count with planner recommendation
     int topChunks = plan.RecommendedChunkCount;
+    bool useVectorSearch = strategy.UseVectorSearch;
+    if (plan.Strategy == "MetadataLookup") useVectorSearch = false;
 
     // NEW: CLASSIFICATION ROUTING
     var classification = await classifier.ClassifyTaskAsync(rewrittenQuery);
-    if (classification.TaskType != "SimpleRetrieval" && classification.Confidence > 60)
+    if (classification.TaskType != "SimpleRetrieval" && classification.Confidence > 60 && plan.Strategy != "MetadataLookup")
     {
         var agentState = await orchestrator.ExecuteAsync(request.message, request.documentId);
         
@@ -312,7 +314,7 @@ List<SourceInfo> sources = new List<SourceInfo>();
 double confidenceScore = 100.0;
 float[] currentEmbedding = new float[1536];
 
-if (strategy.UseVectorSearch)
+if (useVectorSearch)
 {
     Console.WriteLine("ABOUT TO GENERATE EMBEDDINGS");
     var embeddings = await embeddingService.GenerateAsync(new[] { rewrittenQuery });
