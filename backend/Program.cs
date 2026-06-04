@@ -1105,7 +1105,7 @@ double CosineSimilarity(
             }
         }
 
-        var filteredChunks = chunksData.Where(x => x.Score > 0.55).OrderByDescending(x => x.Score).Take(5).ToList();
+        var filteredChunks = chunksData.Where(x => x.Score > 0.25).OrderByDescending(x => x.Score).Take(5).ToList();
         
         var sources = new List<SourceInfo>();
         var finalChunks = new List<string>();
