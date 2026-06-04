@@ -308,6 +308,7 @@ float[] currentEmbedding =
 Console.WriteLine("ABOUT TO RETRIEVE RELEVANT CHUNKS");
 var (relevantChunks,sources, confidenceScore) =
         GetRelevantChunks(
+            rewrittenQuery,
             currentEmbedding,
             connection,
             request.documentId
@@ -353,9 +354,19 @@ Console.WriteLine($"RETRIEVED {relevantChunks.Count} RELEVANT CHUNKS WITH CONFID
          Console.WriteLine("KG Error: " + ex.Message);
     }
 
-    string confidenceWarning = confidenceScore > 0 && confidenceScore <= 85 
-        ? $"\n\n> [!WARNING]\n> **Confidence Score: {confidenceScore:F1}%**. Verification recommended." 
-        : (confidenceScore > 85 ? $"\n\n*(Confidence Score: {confidenceScore:F1}%)*" : "");
+    string confidenceWarning = "";
+    if (confidenceScore <= 60 && relevantChunks.Any())
+    {
+        confidenceWarning = $"\n\n> [!WARNING]\n> **Confidence Score: {confidenceScore:F1}%**. Verification recommended. I found limited information related to your question. Based on the available document...";
+    }
+    else if (confidenceScore > 60 && confidenceScore <= 85)
+    {
+        confidenceWarning = $"\n\n> [!WARNING]\n> **Confidence Score: {confidenceScore:F1}%**. Verification recommended.";
+    }
+    else if (confidenceScore > 85)
+    {
+        confidenceWarning = $"\n\n*(Confidence Score: {confidenceScore:F1}%)*";
+    }
 
     string context = kgContext +
         string.Join(
@@ -1013,6 +1024,7 @@ double CosineSimilarity(
         );
     }
     (List<string> Chunks,List<SourceInfo> Sources, double ConfidenceScore) GetRelevantChunks(
+        string query,
         float[] questionEmbedding,
         SqlConnection connection,
         int? documentId
@@ -1056,6 +1068,7 @@ double CosineSimilarity(
         using SqlDataReader reader =
             command.ExecuteReader();
 
+        var queryWords = query.ToLowerInvariant().Split(new[] { ' ', '?', '.', ',' }, StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length > 3).ToList();
         var chunksData = new List<(string Text, double Score, int DocId, string FileName, int PageNumber)>();
 
         while (reader.Read())
@@ -1076,6 +1089,13 @@ double CosineSimilarity(
                 }
 
                 double similarity = CosineSimilarity(questionEmbedding, chunkEmbedding);
+
+                if (queryWords.Any(w => fileName.ToLowerInvariant().Contains(w)))
+                {
+                    similarity += 0.05;
+                }
+
+                Console.WriteLine($"Chunk Similarity: {similarity:F4} | Doc: {fileName}");
                 chunksData.Add((chunkText, similarity, docId, fileName, pageNumber));
             }
             catch (Exception ex)
@@ -1085,7 +1105,7 @@ double CosineSimilarity(
             }
         }
 
-        var filteredChunks = chunksData.Where(x => x.Score > 0.70).OrderByDescending(x => x.Score).Take(5).ToList();
+        var filteredChunks = chunksData.Where(x => x.Score > 0.55).OrderByDescending(x => x.Score).Take(5).ToList();
         
         var sources = new List<SourceInfo>();
         var finalChunks = new List<string>();
@@ -1129,6 +1149,10 @@ double CosineSimilarity(
 
         double avgScore = filteredChunks.Any() ? filteredChunks.Average(x => x.Score) : 0;
         double confidence = avgScore * 100.0;
+
+        Console.WriteLine($"Top Chunk Score: {(filteredChunks.Any() ? filteredChunks.First().Score.ToString("F4") : "N/A")}");
+        Console.WriteLine($"Confidence: {confidence:F1}%");
+        Console.WriteLine($"Chunks Retrieved: {finalChunks.Count}");
 
         return (
             finalChunks,

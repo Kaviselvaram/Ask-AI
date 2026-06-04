@@ -73,6 +73,8 @@ namespace backend.Services
             using SqlDataReader reader = await command.ExecuteReaderAsync();
             var chunksData = new List<(string Text, double Score, int DocId, string FileName, int PageNumber)>();
 
+            var queryWords = query.ToLowerInvariant().Split(new[] { ' ', '?', '.', ',' }, StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length > 3).ToList();
+
             while (await reader.ReadAsync())
             {
                 try
@@ -89,6 +91,14 @@ namespace backend.Services
                         continue;
 
                     double similarity = CosineSimilarity(questionEmbedding, chunkEmbedding);
+
+                    if (queryWords.Any(w => fileName.ToLowerInvariant().Contains(w)))
+                    {
+                        similarity += 0.05;
+                    }
+
+                    Console.WriteLine($"Chunk Similarity: {similarity:F4} | Doc: {fileName}");
+
                     chunksData.Add((chunkText, similarity, docId, fileName, pageNumber));
                 }
                 catch
@@ -97,7 +107,7 @@ namespace backend.Services
                 }
             }
 
-            var filteredChunks = chunksData.Where(x => x.Score > 0.70).OrderByDescending(x => x.Score).Take(5).ToList();
+            var filteredChunks = chunksData.Where(x => x.Score > 0.55).OrderByDescending(x => x.Score).Take(5).ToList();
             
             var sources = new List<SourceInfo>();
             var finalChunks = new List<string>();
@@ -141,6 +151,10 @@ namespace backend.Services
 
             double avgScore = filteredChunks.Any() ? filteredChunks.Average(x => x.Score) : 0;
             double confidence = avgScore * 100.0;
+
+            Console.WriteLine($"Top Chunk Score: {(filteredChunks.Any() ? filteredChunks.First().Score.ToString("F4") : "N/A")}");
+            Console.WriteLine($"Confidence: {confidence:F1}%");
+            Console.WriteLine($"Chunks Retrieved: {finalChunks.Count}");
 
             return (finalChunks, sources, confidence);
         }

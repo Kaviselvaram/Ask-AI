@@ -19,7 +19,7 @@ namespace backend.Orchestration
         {
             Console.WriteLine("[Report Generator] Generating final report");
 
-            if (state.GlobalConfidenceScore < 60)
+            if (state.Evidence == null || state.Evidence.Count == 0 || state.GlobalConfidenceScore < 30)
             {
                 state.FinalReport = "Insufficient supporting evidence found in the knowledge base.";
                 return;
@@ -32,6 +32,10 @@ namespace backend.Orchestration
 You are a Report Generation Agent.
 Using the following agent findings and raw evidence, generate a comprehensive, structured response to the user's query.
 Format the output in clean Markdown. Do NOT include markdown code blocks around the entire response.
+
+If the confidence score is between 30 and 60, you MUST append this exact warning to the very end of the report:
+> [!WARNING]
+> **Confidence Score: {state.GlobalConfidenceScore:F1}%**. Verification recommended. I found limited information related to your question. Based on the available document...
 
 If the confidence score is between 60 and 85, you MUST append this exact warning to the very end of the report:
 > [!WARNING]
