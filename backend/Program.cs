@@ -64,6 +64,7 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddCors();
 
 builder.Services.AddScoped<IIntentClassifier, IntentClassifier>();
+builder.Services.AddScoped<IPlannerService, PlannerService>();
 builder.Services.AddSingleton<RetrievalStrategyFactory>();
 
 //
@@ -168,7 +169,7 @@ var orchestrator = new AgentOrchestrator(classifier, planner, reportGenerator, a
 //
 
 app.MapPost("/chat",
-async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory) =>
+async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService) =>
 {
     var overallStopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
@@ -280,6 +281,17 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
     Console.WriteLine($"Strategy TopChunks: {strategy.TopChunks}, UseVectorSearch: {strategy.UseVectorSearch}");
     Console.WriteLine($"Classification Latency: {intentStopwatch.ElapsedMilliseconds} ms");
 
+    var plannerStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    var plan = await plannerService.CreatePlanAsync(rewrittenQuery, intent);
+    plannerStopwatch.Stop();
+    
+    Console.WriteLine($"PLAN STRATEGY: {plan.Strategy}");
+    Console.WriteLine($"PLAN STEPS: {string.Join(", ", plan.Steps)}");
+    Console.WriteLine($"Planning Latency: {plannerStopwatch.ElapsedMilliseconds} ms");
+    
+    // Override default intent strategy chunk count with planner recommendation
+    int topChunks = plan.RecommendedChunkCount;
+
     // NEW: CLASSIFICATION ROUTING
     var classification = await classifier.ClassifyTaskAsync(rewrittenQuery);
     if (classification.TaskType != "SimpleRetrieval" && classification.Confidence > 60)
@@ -310,7 +322,7 @@ if (strategy.UseVectorSearch)
     currentEmbedding = embedding.Vector.ToArray();
     
     Console.WriteLine("ABOUT TO RETRIEVE RELEVANT CHUNKS");
-    var result = GetRelevantChunks(rewrittenQuery, currentEmbedding, connection, request.documentId, strategy.TopChunks);
+    var result = GetRelevantChunks(rewrittenQuery, currentEmbedding, connection, request.documentId, topChunks, plan.RequiresMultiDocumentReasoning);
     relevantChunks = result.Chunks;
     sources = result.Sources;
     confidenceScore = result.ConfidenceScore;
@@ -343,8 +355,10 @@ Console.WriteLine($"Retrieval Latency: {retrievalStopwatch.ElapsedMilliseconds} 
 
     // Feature 3: Knowledge Graph Retrieval
     string kgContext = "";
-    try
+    if (plan.RequiresKnowledgeGraph)
     {
+        try
+        {
         string extractPrompt = await File.ReadAllTextAsync("Prompts/ExtractPrompt.txt");
         var extractResult = await kernel.InvokePromptAsync(extractPrompt, new() { ["input"] = rewrittenQuery });
         string keywordsRaw = extractResult.GetValue<string>() ?? "";
@@ -372,10 +386,11 @@ Console.WriteLine($"Retrieval Latency: {retrievalStopwatch.ElapsedMilliseconds} 
             
             if (kgEdges.Any()) kgContext = "Knowledge Graph Context:\n" + string.Join("\n", kgEdges) + "\n\n";
         }
-    }
-    catch (Exception ex)
-    {
-         Console.WriteLine("KG Error: " + ex.Message);
+        }
+        catch (Exception ex)
+        {
+             Console.WriteLine("KG Error: " + ex.Message);
+        }
     }
 
     string confidenceWarning = "";
@@ -1056,6 +1071,11 @@ app.MapGet("/intent/health", () =>
     return Results.Ok(new { status = "healthy" });
 });
 
+app.MapGet("/planner/health", () =>
+{
+    return Results.Ok(new { status = "healthy" });
+});
+
 app.Run();
 
 //
@@ -1094,7 +1114,8 @@ double CosineSimilarity(
         float[] questionEmbedding,
         SqlConnection connection,
         int? documentId,
-        int topChunks
+        int topChunks,
+        bool requiresMultiDocumentReasoning
     )
     {
         Console.WriteLine($"ENTERING GetRelevantChunks. Embedding length: {questionEmbedding.Length}, DocumentId: {documentId}");
@@ -1187,7 +1208,8 @@ double CosineSimilarity(
 
             if (existingSource == null)
             {
-                if (sources.Count >= 3) continue; // Max 3 source documents
+                int maxDocs = requiresMultiDocumentReasoning ? 10 : 1;
+                if (sources.Count >= maxDocs) continue; 
                 
                 currentRefId = sources.Count + 1;
                 existingSource = new SourceInfo
