@@ -285,15 +285,17 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
         });
     }
 
-    var embeddings =
-        Console.WriteLine("ABOUT TO GENERATE EMBEDDINGS");
-        await embeddingService.GenerateAsync(
-            new[]
-            {
-                rewrittenQuery
-            }
-        );
-        Console.WriteLine("EMBEDDING SUCCESS");
+Console.WriteLine("ABOUT TO GENERATE EMBEDDINGS");
+
+var embeddings =
+    await embeddingService.GenerateAsync(
+        new[]
+        {
+            rewrittenQuery
+        }
+    );
+
+Console.WriteLine("EMBEDDING SUCCESS");
 Console.WriteLine("STEP 5");
 
 var embedding =
