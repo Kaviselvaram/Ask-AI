@@ -65,6 +65,7 @@ builder.Services.AddCors();
 
 builder.Services.AddScoped<IIntentClassifier, IntentClassifier>();
 builder.Services.AddScoped<IPlannerService, PlannerService>();
+builder.Services.AddScoped<IMemoryService, MemoryService>();
 builder.Services.AddSingleton<RetrievalStrategyFactory>();
 
 //
@@ -169,7 +170,7 @@ var orchestrator = new AgentOrchestrator(classifier, planner, reportGenerator, a
 //
 
 app.MapPost("/chat",
-async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService) =>
+async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService) =>
 {
     var overallStopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
@@ -262,11 +263,42 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
         });
     }
 
-    // Feature 5: Query Rewriter
+    // Feature 5: Query Rewriter + Memory Injection
+    string isMemoryEnabledStr = Environment.GetEnvironmentVariable("Memory:Enabled") ?? "true";
+    bool isMemoryEnabled = bool.TryParse(isMemoryEnabledStr, out bool parsed) ? parsed : true;
+
+    string conversationHistory = "";
+    string recentEntities = "";
+
+    if (isMemoryEnabled && !string.IsNullOrEmpty(request.conversationId))
+    {
+        // Fire and forget entity extraction
+        _ = memoryService.ExtractAndSaveEntitiesAsync(request.conversationId, request.message);
+        
+        // Save user message
+        await memoryService.SaveMessageAsync(request.conversationId, "User", request.message);
+
+        var messages = await memoryService.GetRecentMessagesAsync(request.conversationId);
+        var entities = await memoryService.GetRecentEntitiesAsync(request.conversationId);
+
+        if (messages.Count > 0)
+        {
+            conversationHistory = "Previous Messages:\n" + string.Join("\n", messages.Select(m => $"{m.Role}: {m.Content}"));
+        }
+        if (entities.Count > 0)
+        {
+            recentEntities = "Recent Entities:\n" + string.Join(", ", entities.Select(e => e.EntityName));
+        }
+    }
+
     string rewritePrompt = await File.ReadAllTextAsync("Prompts/RewritePrompt.txt");
     Console.WriteLine("RewritePrompt LOADED");  
     Console.WriteLine("ABOUT TO CALL KERNEL");
-    var rewriteResult = await kernel.InvokePromptAsync(rewritePrompt, new() { ["input"] = request.message });
+    var rewriteResult = await kernel.InvokePromptAsync(rewritePrompt, new() { 
+        ["input"] = request.message,
+        ["history"] = conversationHistory,
+        ["entities"] = recentEntities
+    });
     Console.WriteLine("KERNEL CALL SUCCESS");
     string rewrittenQuery = rewriteResult.GetValue<string>()?.Trim() ?? request.message;
     Console.WriteLine($"Original Query: {request.message} | Rewritten: {rewrittenQuery}");
@@ -298,8 +330,13 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
     var classification = await classifier.ClassifyTaskAsync(rewrittenQuery);
     if (classification.TaskType != "SimpleRetrieval" && classification.Confidence > 60 && plan.Strategy != "MetadataLookup")
     {
-        var agentState = await orchestrator.ExecuteAsync(request.message, request.documentId);
+        var agentState = await orchestrator.ExecuteAsync(request.message, request.documentId, conversationHistory, recentEntities);
         
+        if (isMemoryEnabled && !string.IsNullOrEmpty(request.conversationId))
+        {
+            await memoryService.SaveMessageAsync(request.conversationId, "Assistant", agentState.FinalReport);
+        }
+
         return Results.Ok(new {
             result = agentState.FinalReport,
             sources = agentState.Sources.Distinct().ToList(),
@@ -556,6 +593,10 @@ Knowledge Base Context & Evidence:
 [SYSTEM MANIFEST - AVAILABLE DOCUMENTS IN VAULT]
 {availableDocs}
 
+[CONVERSATION CONTEXT]
+{conversationHistory}
+{recentEntities}
+
 User Query:
 
 {request.message}
@@ -600,6 +641,11 @@ Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
     history.AddAssistantMessage(
         fullResponse
     );
+
+    if (isMemoryEnabled && !string.IsNullOrEmpty(request.conversationId))
+    {
+        await memoryService.SaveMessageAsync(request.conversationId, "Assistant", fullResponse);
+    }
     string insertSql =
         @"INSERT INTO QuestionCache
         (
@@ -1078,6 +1124,11 @@ app.MapGet("/planner/health", () =>
     return Results.Ok(new { status = "healthy" });
 });
 
+app.MapGet("/memory/health", () =>
+{
+    return Results.Ok(new { status = "healthy" });
+});
+
 app.Run();
 
 //
@@ -1251,4 +1302,4 @@ double CosineSimilarity(
             confidence
         );
     }
-    record ChatRequest(string message, int? documentId, double? temperature, int? maxTokens, double? topP);
+    record ChatRequest(string message, int? documentId, double? temperature, int? maxTokens, double? topP, string? conversationId);

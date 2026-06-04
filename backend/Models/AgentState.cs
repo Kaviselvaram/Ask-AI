@@ -14,6 +14,8 @@ namespace backend.Models
         public string FinalReport { get; set; } = string.Empty;
         public bool IsComplete { get; set; } = false;
         public string ErrorMessage { get; set; } = string.Empty;
+        public string ConversationHistory { get; set; } = string.Empty;
+        public string RecentEntities { get; set; } = string.Empty;
     }
 
     public class EvidenceNode

@@ -1,2 +1,11 @@
-Rewrite the following user query to be highly optimized for vector semantic search. Expand acronyms, add missing context if obvious, and clarify intent. Output ONLY the rewritten query text.
+Rewrite the following user query to be highly optimized for vector semantic search. Expand acronyms, add missing context if obvious, and clarify intent. 
+You will be provided with the Conversation History and Recent Entities to help you resolve pronouns (like 'it', 'they') and implicit references (like 'the document').
+Output ONLY the rewritten query text.
+
+Conversation History:
+{{$history}}
+
+Recent Entities:
+{{$entities}}
+
 User Query: {{$input}}

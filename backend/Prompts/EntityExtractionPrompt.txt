@@ -1,0 +1,13 @@
+Extract important entities discussed in the user query.
+Focus ONLY on:
+- Organizations
+- Products
+- Systems
+- Concepts
+- Documents
+
+Return a JSON array of strings. Do not include any other text or markdown blocks.
+If there are no entities, return an empty array: []
+
+User Query:
+{{$input}}

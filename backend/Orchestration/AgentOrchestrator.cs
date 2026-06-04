@@ -28,7 +28,7 @@ namespace backend.Orchestration
             _agents = agents.ToDictionary(a => a.AgentName, a => a);
         }
 
-        public async Task<AgentState> ExecuteAsync(string query, int? documentId = null)
+        public async Task<AgentState> ExecuteAsync(string query, int? documentId = null, string conversationHistory = "", string recentEntities = "")
         {
             Console.WriteLine("=====================================");
             Console.WriteLine($"[Orchestrator] Starting workflow for: {query}");
@@ -36,7 +36,9 @@ namespace backend.Orchestration
             var state = new AgentState 
             { 
                 OriginalQuery = query,
-                RewrittenQuery = query // Assume already rewritten upstream, or rewrite here
+                RewrittenQuery = query, // Assume already rewritten upstream, or rewrite here
+                ConversationHistory = conversationHistory,
+                RecentEntities = recentEntities
             };
 
             // 1. Classification

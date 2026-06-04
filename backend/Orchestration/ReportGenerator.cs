@@ -58,6 +58,10 @@ Confidence: Medium
 Agent Findings:
 {agentFindings}
 
+[CONVERSATION CONTEXT]
+{state.ConversationHistory}
+{state.RecentEntities}
+
 Raw Evidence Context:
 {rawChunks}
 
