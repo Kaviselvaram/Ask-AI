@@ -66,20 +66,6 @@ builder.Services.AddCors();
 builder.Services.AddScoped<IIntentClassifier, IntentClassifier>();
 builder.Services.AddSingleton<RetrievalStrategyFactory>();
 
-var app = builder.Build();
-
-// app.UseAntiforgery();
-
-
-app.UseSwagger();
-
-app.UseSwaggerUI();
-
-app.UseCors(policy =>
-    policy.AllowAnyOrigin()
-          .AllowAnyHeader()
-          .AllowAnyMethod());
-
 //
 // AZURE OPENAI CONFIG
 //
@@ -99,27 +85,19 @@ string embeddingDeployment =
     Environment.GetEnvironmentVariable(
         "AZURE_OPENAI_EMBEDDING_DEPLOYMENT")!;
 
-
 string connectionString =
     Environment.GetEnvironmentVariable(
         "SQL_CONNECTION_STRING")!
     + ";Pooling=false";
 
+Console.WriteLine("Connected to Azure SQL!");
+Console.WriteLine("SQL Connection String Loaded");
 
-
-Console.WriteLine(
-    "Connected to Azure SQL!"
-);
-
-Console.WriteLine(
-    "SQL Connection String Loaded"
-);
 //
 // CREATE SEMANTIC KERNEL
 //
 
 var kernelBuilder = Kernel.CreateBuilder();
-
 
 kernelBuilder.Services.AddSingleton<
     IFunctionInvocationFilter,
@@ -137,6 +115,8 @@ kernelBuilder.AddAzureOpenAIEmbeddingGenerator(
 );
 
 Kernel kernel = kernelBuilder.Build();
+builder.Services.AddSingleton(kernel);
+
 var embeddingService =
     kernel.Services.GetRequiredService<
         Microsoft.Extensions.AI.IEmbeddingGenerator<
@@ -145,6 +125,20 @@ var embeddingService =
         >
     >();
 kernel.Plugins.AddFromType<StartupPlugin>();
+
+var app = builder.Build();
+
+// app.UseAntiforgery();
+
+
+app.UseSwagger();
+
+app.UseSwaggerUI();
+
+app.UseCors(policy =>
+    policy.AllowAnyOrigin()
+          .AllowAnyHeader()
+          .AllowAnyMethod());
 
 
 var chatService =
