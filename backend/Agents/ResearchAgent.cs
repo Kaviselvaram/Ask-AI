@@ -23,7 +23,12 @@ namespace backend.Agents
         {
             Console.WriteLine($"[Agent: {AgentName}] Executing research for query: {state.OriginalQuery}");
 
-            var (chunks, confidence) = await _retrievalService.GetRelevantChunksAsync(state.RewrittenQuery);
+            var (chunks, sources, confidence) = await _retrievalService.GetRelevantChunksAsync(state.RewrittenQuery);
+
+            if (sources != null && sources.Any())
+            {
+                state.Sources.AddRange(sources);
+            }
 
             foreach (var chunk in chunks)
             {

@@ -280,6 +280,7 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
         
         return Results.Ok(new {
             result = agentState.FinalReport,
+            sources = agentState.Sources.Distinct().ToList(),
             chunksRetrieved = agentState.Evidence.Count,
             similarityScore = agentState.GlobalConfidenceScore / 100.0
         });
@@ -952,6 +953,32 @@ app.MapGet("/",
 {
     return "Backend Working";
 });
+
+app.MapGet("/download/{documentId:int}", async (int documentId, HttpContext context) =>
+{
+    using SqlConnection connection = new SqlConnection(connectionString);
+    await connection.OpenAsync();
+    
+    string sql = "SELECT FileName FROM Documents WHERE Id = @Id";
+    using SqlCommand cmd = new SqlCommand(sql, connection);
+    cmd.Parameters.AddWithValue("@Id", documentId);
+    
+    var fileNameObj = await cmd.ExecuteScalarAsync();
+    if (fileNameObj == null) return Results.NotFound(new { error = "Document not found." });
+    
+    string fileName = fileNameObj.ToString();
+    string filePath = Path.Combine("Uploads", fileName);
+    
+    if (!System.IO.File.Exists(filePath)) return Results.NotFound(new { error = "File not found on disk." });
+    
+    var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+    if (!provider.TryGetContentType(fileName, out var contentType))
+    {
+        contentType = "application/octet-stream";
+    }
+    
+    return Results.File(Path.GetFullPath(filePath), contentType, fileName);
+});
 app.Run();
 
 //
@@ -997,7 +1024,8 @@ double CosineSimilarity(
                 c.ChunkText,
                 c.Embedding,
                 (SELECT TOP 1 d2.FileName FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as FileName,
-                (SELECT TOP 1 m2.PageNumber FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as PageNumber
+                (SELECT TOP 1 m2.PageNumber FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as PageNumber,
+                (SELECT TOP 1 d2.Id FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as DocumentId
             FROM Chunks c
             WHERE EXISTS (
                 SELECT 1 FROM DocumentChunkMapping m 
@@ -1044,9 +1072,11 @@ double CosineSimilarity(
                     reader.GetString(1);
 
                 string fileName =
-                    reader.GetString(2);
+                    reader.IsDBNull(2) ? "Unknown" : reader.GetString(2);
 
                 int pageNumber = reader.IsDBNull(3) ? 1 : reader.GetInt32(3);
+
+                int docId = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
 
                 float[] chunkEmbedding =
                     embeddingText
@@ -1073,12 +1103,18 @@ double CosineSimilarity(
                         similarity
                     )
                 );
-                sources.Add(
-                    new SourceInfo(
-                        fileName,
-                        pageNumber
-                    )
-                );
+                
+                if (docId != 0 && fileName != "Unknown")
+                {
+                    sources.Add(
+                        new SourceInfo(
+                            docId,
+                            fileName,
+                            pageNumber,
+                            $"/download/{docId}"
+                        )
+                    );
+                }
             }
             catch (Exception ex)
             {
@@ -1100,9 +1136,3 @@ double CosineSimilarity(
         );
     }
     record ChatRequest(string message, int? documentId, double? temperature, int? maxTokens, double? topP);
-
-    record SourceInfo(
-    string FileName,
-    int PageNumber
-);
-

@@ -460,7 +460,14 @@ function App() {
                                 key={index}
                                 className="source-item"
                               >
-                                📄 {source.fileName}
+                                <a
+                                  href={`${import.meta.env.VITE_API_BASE_URL}${source.downloadUrl}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{ color: "inherit", textDecoration: "none" }}
+                                >
+                                  📄 {source.fileName}
+                                </a>
                                 {" "}
                                 (Page {source.pageNumber})
                               </div>

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.AI;
+using backend.Models;
 
 namespace backend.Services
 {
@@ -33,7 +34,7 @@ namespace backend.Services
             return dotProduct / (Math.Sqrt(magnitudeA) * Math.Sqrt(magnitudeB));
         }
 
-        public async Task<(List<string> Chunks, double ConfidenceScore)> GetRelevantChunksAsync(
+        public async Task<(List<string> Chunks, List<SourceInfo> Sources, double ConfidenceScore)> GetRelevantChunksAsync(
             string query,
             int? documentId = null)
         {
@@ -48,7 +49,8 @@ namespace backend.Services
                     c.ChunkText,
                     c.Embedding,
                     (SELECT TOP 1 d2.FileName FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as FileName,
-                    (SELECT TOP 1 m2.PageNumber FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as PageNumber
+                    (SELECT TOP 1 m2.PageNumber FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as PageNumber,
+                    (SELECT TOP 1 d2.Id FROM Documents d2 JOIN DocumentChunkMapping m2 ON d2.Id = m2.DocumentId WHERE m2.ChunkId = c.Id AND d2.Status = 'Latest') as DocumentId
                 FROM Chunks c
                 WHERE EXISTS (
                     SELECT 1 FROM DocumentChunkMapping m 
@@ -70,6 +72,7 @@ namespace backend.Services
 
             using SqlDataReader reader = await command.ExecuteReaderAsync();
             var chunks = new List<(string Text, double Score)>();
+            var sources = new List<SourceInfo>();
 
             while (await reader.ReadAsync())
             {
@@ -79,6 +82,7 @@ namespace backend.Services
                     string embeddingText = reader.GetString(1);
                     string fileName = reader.IsDBNull(2) ? "Unknown" : reader.GetString(2);
                     int pageNumber = reader.IsDBNull(3) ? 1 : reader.GetInt32(3);
+                    int docId = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
 
                     float[] chunkEmbedding = embeddingText.Split(',').Select(float.Parse).ToArray();
 
@@ -89,6 +93,11 @@ namespace backend.Services
 
                     string formattedChunk = $"[Source: {fileName} | Page: {pageNumber}]\n{chunkText}";
                     chunks.Add((formattedChunk, similarity));
+
+                    if (docId != 0 && fileName != "Unknown")
+                    {
+                        sources.Add(new SourceInfo(docId, fileName, pageNumber, $"/download/{docId}"));
+                    }
                 }
                 catch
                 {
@@ -100,7 +109,7 @@ namespace backend.Services
             double avgScore = topChunks.Any() ? topChunks.Average(x => x.Score) : 0;
             double confidence = avgScore * 100.0;
 
-            return (topChunks.Select(x => x.Text).ToList(), confidence);
+            return (topChunks.Select(x => x.Text).ToList(), sources.Distinct().ToList(), confidence);
         }
     }
 }

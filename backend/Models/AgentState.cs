@@ -9,6 +9,7 @@ namespace backend.Models
         public string Intent { get; set; } = string.Empty;
         public List<string> ExecutionPlan { get; set; } = new();
         public List<EvidenceNode> Evidence { get; set; } = new();
+        public List<SourceInfo> Sources { get; set; } = new();
         public double GlobalConfidenceScore { get; set; } = 0.0;
         public string FinalReport { get; set; } = string.Empty;
         public bool IsComplete { get; set; } = false;
