@@ -20,6 +20,8 @@ using backend.Agents;
 using backend.Orchestration;
 using backend.Services;
 
+
+
 List<string> ChunkText(
     string text,
     int size = 500
@@ -171,6 +173,8 @@ var orchestrator = new AgentOrchestrator(classifier, planner, reportGenerator, a
 app.MapPost("/chat",
 async (ChatRequest request) =>
 {
+    try
+    {
     Console.WriteLine("STEP 1");
 
 using SqlConnection connection =
@@ -241,6 +245,7 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
     var cachedResult =
         selectCommand.ExecuteScalar();
     Console.WriteLine("STEP 4");
+    Console.WriteLine("ABOUT TO LOAD RewritePrompt.txt");
 
     if (
     !shouldSkipCache &&
@@ -260,7 +265,10 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
 
     // Feature 5: Query Rewriter
     string rewritePrompt = await File.ReadAllTextAsync("Prompts/RewritePrompt.txt");
+    Console.WriteLine("RewritePrompt LOADED");  
+    Console.WriteLine("ABOUT TO CALL KERNEL");
     var rewriteResult = await kernel.InvokePromptAsync(rewritePrompt, new() { ["input"] = request.message });
+    Console.WriteLine("KERNEL CALL SUCCESS");
     string rewrittenQuery = rewriteResult.GetValue<string>()?.Trim() ?? request.message;
     Console.WriteLine($"Original Query: {request.message} | Rewritten: {rewrittenQuery}");
 
@@ -278,12 +286,14 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
     }
 
     var embeddings =
+        Console.WriteLine("ABOUT TO GENERATE EMBEDDINGS");
         await embeddingService.GenerateAsync(
             new[]
             {
                 rewrittenQuery
             }
         );
+        Console.WriteLine("EMBEDDING SUCCESS");
 Console.WriteLine("STEP 5");
 
 var embedding =
@@ -596,6 +606,20 @@ Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
         chunksRetrieved = relevantChunks.Count,
         similarityScore = confidenceScore / 100.0
     });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("================================");
+        Console.WriteLine("CHAT ERROR");
+        Console.WriteLine(ex.ToString());
+        Console.WriteLine("================================");
+
+        return Results.Problem(
+            detail: ex.ToString(),
+            title: "Chat Endpoint Error",
+            statusCode: 500
+        );
+    }
 });
 
 app.MapPost("/upload",
