@@ -643,7 +643,7 @@ async (HttpRequest request) =>
     string targetGroupIdStr = form.ContainsKey("targetGroupId") ? form["targetGroupId"].ToString() : null;
     Guid? targetGroupId = !string.IsNullOrEmpty(targetGroupIdStr) ? Guid.Parse(targetGroupIdStr) : null;
 
-    var uploadsFolder = "Uploads";
+    var uploadsFolder = Path.Combine(app.Environment.ContentRootPath, "Uploads");
     Directory.CreateDirectory(uploadsFolder);
     var filePath = Path.Combine(uploadsFolder, file.FileName);
 
@@ -974,9 +974,17 @@ app.MapGet("/download/{documentId:int}", async (int documentId, HttpContext cont
     if (fileNameObj == null) return Results.NotFound(new { error = "Document not found." });
     
     string fileName = fileNameObj.ToString();
-    string filePath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", fileName);
+    string filePath = Path.Combine(app.Environment.ContentRootPath, "Uploads", fileName);
     
-    if (!System.IO.File.Exists(filePath)) return Results.NotFound(new { error = "File not found on disk." });
+    if (!System.IO.File.Exists(filePath)) 
+    {
+        Console.WriteLine($"[DOWNLOAD ERROR] File not found on disk.");
+        Console.WriteLine($"DocumentId: {documentId}");
+        Console.WriteLine($"FileName: {fileName}");
+        Console.WriteLine($"Expected Path: {filePath}");
+        Console.WriteLine($"Exists: false");
+        return Results.NotFound(new { error = "File not found on disk.", path = filePath, fileName = fileName });
+    }
     
     var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
     if (!provider.TryGetContentType(fileName, out var contentType))
@@ -986,6 +994,36 @@ app.MapGet("/download/{documentId:int}", async (int documentId, HttpContext cont
     
     return Results.File(Path.GetFullPath(filePath), contentType, fileName);
 });
+
+app.MapGet("/documents/health", async () =>
+{
+    using SqlConnection connection = new SqlConnection(connectionString);
+    await connection.OpenAsync();
+    
+    string sql = "SELECT Id, FileName FROM Documents WHERE Status = 'Latest'";
+    using SqlCommand cmd = new SqlCommand(sql, connection);
+    using var reader = await cmd.ExecuteReaderAsync();
+    
+    var results = new List<object>();
+    var uploadsFolder = Path.Combine(app.Environment.ContentRootPath, "Uploads");
+
+    while (await reader.ReadAsync())
+    {
+        int documentId = reader.GetInt32(0);
+        string fileName = reader.GetString(1);
+        string filePath = Path.Combine(uploadsFolder, fileName);
+        bool exists = System.IO.File.Exists(filePath);
+        
+        results.Add(new {
+            documentId = documentId,
+            fileName = fileName,
+            existsOnDisk = exists
+        });
+    }
+    
+    return Results.Ok(results);
+});
+
 app.Run();
 
 //
