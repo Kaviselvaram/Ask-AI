@@ -63,6 +63,9 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddCors();
 
+builder.Services.AddScoped<IIntentClassifier, IntentClassifier>();
+builder.Services.AddSingleton<RetrievalStrategyFactory>();
+
 var app = builder.Build();
 
 // app.UseAntiforgery();
@@ -171,8 +174,9 @@ var orchestrator = new AgentOrchestrator(classifier, planner, reportGenerator, a
 //
 
 app.MapPost("/chat",
-async (ChatRequest request) =>
+async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory) =>
 {
+    var overallStopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
     {
     Console.WriteLine("STEP 1");
@@ -272,6 +276,16 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
     string rewrittenQuery = rewriteResult.GetValue<string>()?.Trim() ?? request.message;
     Console.WriteLine($"Original Query: {request.message} | Rewritten: {rewrittenQuery}");
 
+    var intentStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    var intent = await intentClassifier.ClassifyAsync(rewrittenQuery);
+    intentStopwatch.Stop();
+
+    var strategy = strategyFactory.GetStrategy(intent);
+    
+    Console.WriteLine($"Intent: {intent}");
+    Console.WriteLine($"Strategy TopChunks: {strategy.TopChunks}, UseVectorSearch: {strategy.UseVectorSearch}");
+    Console.WriteLine($"Classification Latency: {intentStopwatch.ElapsedMilliseconds} ms");
+
     // NEW: CLASSIFICATION ROUTING
     var classification = await classifier.ClassifyTaskAsync(rewrittenQuery);
     if (classification.TaskType != "SimpleRetrieval" && classification.Confidence > 60)
@@ -286,34 +300,50 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
         });
     }
 
-Console.WriteLine("ABOUT TO GENERATE EMBEDDINGS");
+var retrievalStopwatch = System.Diagnostics.Stopwatch.StartNew();
+List<string> relevantChunks = new List<string>();
+List<SourceInfo> sources = new List<SourceInfo>();
+double confidenceScore = 100.0;
+float[] currentEmbedding = new float[1536];
 
-var embeddings =
-    await embeddingService.GenerateAsync(
-        new[]
-        {
-            rewrittenQuery
-        }
-    );
-
-Console.WriteLine("EMBEDDING SUCCESS");
-Console.WriteLine("STEP 5");
-
-var embedding =
-    embeddings.First();
-
-float[] currentEmbedding =
-    embedding.Vector.ToArray();
-
-Console.WriteLine("ABOUT TO RETRIEVE RELEVANT CHUNKS");
-var (relevantChunks,sources, confidenceScore) =
-        GetRelevantChunks(
-            rewrittenQuery,
-            currentEmbedding,
-            connection,
-            request.documentId
-        );
-Console.WriteLine($"RETRIEVED {relevantChunks.Count} RELEVANT CHUNKS WITH CONFIDENCE {confidenceScore}");
+if (strategy.UseVectorSearch)
+{
+    Console.WriteLine("ABOUT TO GENERATE EMBEDDINGS");
+    var embeddings = await embeddingService.GenerateAsync(new[] { rewrittenQuery });
+    Console.WriteLine("EMBEDDING SUCCESS");
+    
+    var embedding = embeddings.First();
+    currentEmbedding = embedding.Vector.ToArray();
+    
+    Console.WriteLine("ABOUT TO RETRIEVE RELEVANT CHUNKS");
+    var result = GetRelevantChunks(rewrittenQuery, currentEmbedding, connection, request.documentId, strategy.TopChunks);
+    relevantChunks = result.Chunks;
+    sources = result.Sources;
+    confidenceScore = result.ConfidenceScore;
+    Console.WriteLine($"RETRIEVED {relevantChunks.Count} RELEVANT CHUNKS WITH CONFIDENCE {confidenceScore}");
+}
+else
+{
+    Console.WriteLine("BYPASSING VECTOR SEARCH - QUERYING METADATA");
+    string sysSql = "SELECT Id, FileName FROM Documents WHERE Status = 'Latest'";
+    if (request.documentId.HasValue) sysSql += " AND Id = @DocId";
+    
+    using SqlCommand sysCmd = new SqlCommand(sysSql, connection);
+    if (request.documentId.HasValue) sysCmd.Parameters.AddWithValue("@DocId", request.documentId.Value);
+    
+    using SqlDataReader sysReader = await sysCmd.ExecuteReaderAsync();
+    var fileNames = new List<string>();
+    while (await sysReader.ReadAsync())
+    {
+        int docId = sysReader.GetInt32(0);
+        string fName = sysReader.GetString(1);
+        fileNames.Add(fName);
+        sources.Add(new SourceInfo { ReferenceId = sources.Count + 1, DocumentId = docId, FileName = fName, DownloadUrl = $"/download/{docId}" });
+    }
+    relevantChunks.Add($"System Metadata:\nThe following files are available in the system:\n" + string.Join("\n", fileNames));
+}
+retrievalStopwatch.Stop();
+Console.WriteLine($"Retrieval Latency: {retrievalStopwatch.ElapsedMilliseconds} ms");
 
 // Removed hard short-circuit; we now trust the LLM to refuse based on system prompt.
 
@@ -609,6 +639,9 @@ Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
             "SAVED TO CACHE"
         );
     }
+
+    overallStopwatch.Stop();
+    Console.WriteLine($"Total Request Latency: {overallStopwatch.ElapsedMilliseconds} ms");
 
     return Results.Ok(new
     {
@@ -1024,6 +1057,11 @@ app.MapGet("/documents/health", async () =>
     return Results.Ok(results);
 });
 
+app.MapGet("/intent/health", () =>
+{
+    return Results.Ok(new { status = "healthy" });
+});
+
 app.Run();
 
 //
@@ -1061,7 +1099,8 @@ double CosineSimilarity(
         string query,
         float[] questionEmbedding,
         SqlConnection connection,
-        int? documentId
+        int? documentId,
+        int topChunks
     )
     {
         Console.WriteLine($"ENTERING GetRelevantChunks. Embedding length: {questionEmbedding.Length}, DocumentId: {documentId}");
@@ -1139,7 +1178,7 @@ double CosineSimilarity(
             }
         }
 
-        var filteredChunks = chunksData.Where(x => x.Score > 0.25).OrderByDescending(x => x.Score).Take(5).ToList();
+        var filteredChunks = chunksData.Where(x => x.Score > 0.25).OrderByDescending(x => x.Score).Take(topChunks).ToList();
         
         var sources = new List<SourceInfo>();
         var finalChunks = new List<string>();

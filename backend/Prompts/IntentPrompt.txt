@@ -1,0 +1,17 @@
+Classify the user query into exactly one category.
+
+Valid categories:
+
+Fact
+Summary
+Comparison
+Research
+DocumentQuestion
+SystemQuestion
+Unknown
+
+Return ONLY the category name. No explanations. No extra text.
+
+Query:
+
+{{$input}}
