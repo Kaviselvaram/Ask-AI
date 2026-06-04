@@ -30,7 +30,8 @@ If the user asks questions like:
 - What documents are uploaded?
 - How many files exist?
 - Which documents are available?
-Use the SYSTEM MANIFEST section to answer naturally.
+- Summarize all uploaded files.
+Use the SYSTEM MANIFEST section to answer naturally. If asked to summarize all files and you only have metadata, list the files and politely ask the user to specify which one to summarize. Do NOT say there are no files available.
 
 CONTEXT:
 {{$context}}
