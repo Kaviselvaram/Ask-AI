@@ -954,7 +954,11 @@ async (HttpRequest request) =>
     string targetGroupIdStr = form.ContainsKey("targetGroupId") ? form["targetGroupId"].ToString() : null;
     Guid? targetGroupId = !string.IsNullOrEmpty(targetGroupIdStr) ? Guid.Parse(targetGroupIdStr) : null;
 
-    var uploadsFolder = Path.Combine(app.Environment.ContentRootPath, "Uploads");
+    string homeDir = Environment.GetEnvironmentVariable("HOME");
+    string uploadsFolder = string.IsNullOrEmpty(homeDir) 
+        ? Path.Combine(app.Environment.ContentRootPath, "Uploads") 
+        : Path.Combine(homeDir, "data", "Uploads");
+    
     Directory.CreateDirectory(uploadsFolder);
     var filePath = Path.Combine(uploadsFolder, file.FileName);
 
@@ -1285,7 +1289,12 @@ app.MapGet("/download/{documentId:int}", async (int documentId, HttpContext cont
     if (fileNameObj == null) return Results.NotFound(new { error = "Document not found." });
     
     string fileName = fileNameObj.ToString();
-    string filePath = Path.Combine(app.Environment.ContentRootPath, "Uploads", fileName);
+    string homeDir = Environment.GetEnvironmentVariable("HOME");
+    string uploadsFolder = string.IsNullOrEmpty(homeDir) 
+        ? Path.Combine(app.Environment.ContentRootPath, "Uploads") 
+        : Path.Combine(homeDir, "data", "Uploads");
+        
+    string filePath = Path.Combine(uploadsFolder, fileName);
     
     if (!System.IO.File.Exists(filePath)) 
     {
