@@ -1440,20 +1440,32 @@ app.MapGet("/download/{documentId:int}", async (int documentId, HttpContext cont
     
     string fileName = fileNameObj.ToString();
     string homeDir = Environment.GetEnvironmentVariable("HOME");
-    string uploadsFolder = string.IsNullOrEmpty(homeDir) 
+    
+    // First try the new persistent path
+    string persistentFolder = string.IsNullOrEmpty(homeDir) 
         ? Path.Combine(app.Environment.ContentRootPath, "Uploads") 
         : Path.Combine(homeDir, "data", "Uploads");
-        
-    string filePath = Path.Combine(uploadsFolder, fileName);
+    string filePath = Path.Combine(persistentFolder, fileName);
     
-    if (!System.IO.File.Exists(filePath)) 
+    // If not found in persistent path, fallback to legacy wwwroot path
+    if (!System.IO.File.Exists(filePath))
     {
-        Console.WriteLine("DOWNLOAD REQUESTED");
-        Console.WriteLine($"DOCUMENT ID: {documentId}");
-        Console.WriteLine($"FILE NAME: {fileName}");
-        Console.WriteLine($"EXPECTED PATH: {filePath}");
-        Console.WriteLine($"FILE EXISTS?: NO");
-        return Results.NotFound(new { error = "File not found on disk.", path = filePath, fileName = fileName });
+        string legacyFolder = Path.Combine(app.Environment.ContentRootPath, "Uploads");
+        string legacyPath = Path.Combine(legacyFolder, fileName);
+        
+        if (System.IO.File.Exists(legacyPath))
+        {
+            filePath = legacyPath; // Use the legacy path
+        }
+        else
+        {
+            Console.WriteLine("DOWNLOAD REQUESTED");
+            Console.WriteLine($"DOCUMENT ID: {documentId}");
+            Console.WriteLine($"FILE NAME: {fileName}");
+            Console.WriteLine($"EXPECTED PATH: {filePath} AND {legacyPath}");
+            Console.WriteLine($"FILE EXISTS?: NO");
+            return Results.NotFound(new { error = "File not found on disk.", path = filePath, fileName = fileName });
+        }
     }
     
     var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
