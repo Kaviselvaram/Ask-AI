@@ -214,7 +214,13 @@ bool shouldSkipCache =
     ||
     query.Contains("create")
     ||
-    query.Contains("suggest");
+    query.Contains("suggest")
+    ||
+    query.Contains("analyze")
+    ||
+    query.Contains("insight")
+    ||
+    query.Contains("themes");
 
 Console.WriteLine($"QUERY: {request.message}");
 Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
@@ -344,6 +350,8 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
     var plan = await plannerService.CreatePlanAsync(rewrittenQuery, intent);
     plannerStopwatch.Stop();
     
+    Console.WriteLine($"INTENT DETECTED: {intent}");
+    Console.WriteLine($"PLANNER ROUTE: {plan.Strategy}");
     Console.WriteLine($"INTENT: {intent}");
     Console.WriteLine($"PLANNER TYPE: {intent}");
     Console.WriteLine($"PLAN STRATEGY: {plan.Strategy}");
@@ -641,6 +649,8 @@ User Query:
     var insightKeywords = new[] { "analyze", "insight", "patterns", "themes", "contradiction", "gaps", "duplicates" };
     bool needsInsights = insightKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
     
+    Console.WriteLine($"INSIGHT MODE ENABLED: {needsInsights}");
+
     if (agentsEnabled && !needsInsights)
     {
         try
@@ -708,6 +718,7 @@ User Query:
     {
         try
         {
+            Console.WriteLine("VAULT ANALYSIS SERVICE STARTED");
             var vaultAnalysisResult = await vaultAnalysisService.BuildVaultContextAsync(connection, 3);
             string vaultContext = vaultAnalysisResult.VaultContext;
             
@@ -717,7 +728,9 @@ User Query:
             context = vaultContext;
             
             using var ctsInsight = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            Console.WriteLine("INSIGHT ENGINE STARTED");
             var insightResult = await insightEngine.AnalyzeAsync(vaultContext, ctsInsight.Token);
+            Console.WriteLine("INSIGHT ENGINE COMPLETED");
             
             if (insightResult != null && insightResult.Confidence > 0)
             {
@@ -744,10 +757,14 @@ User Query:
         }
         catch (Exception ex)
         {
-            Console.WriteLine("INSIGHT ENGINE FAILED");
+            Console.WriteLine($"INSIGHT ENGINE FAILED: {ex.Message}");
             Console.WriteLine($"[Insight Engine Error]: {ex.Message}");
             if (string.IsNullOrEmpty(fullResponse)) fullResponse = "Insight Engine encountered an error during analysis: " + ex.Message;
         }
+    }
+    else
+    {
+        if (isInsightsEnabled && !needsInsights) Console.WriteLine("INSIGHT ENGINE SKIPPED");
     }
 
     // Feature 4: Verification Intelligence Layer
