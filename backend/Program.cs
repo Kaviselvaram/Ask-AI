@@ -80,6 +80,7 @@ builder.Services.AddScoped<IVaultAnalysisService, VaultAnalysisService>();
 builder.Services.AddScoped<IWorkspaceCatalogBuilder, WorkspaceCatalogBuilder>();
 builder.Services.AddScoped<IWorkspaceRelationshipEngine, WorkspaceRelationshipEngine>();
 builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();
+builder.Services.AddScoped<IResearchDirector, ResearchDirector>();
 
 //
 // AZURE OPENAI CONFIG
@@ -181,9 +182,10 @@ var chatService =
 //
 
 app.MapGet("/insights/health", () => Results.Ok(new { status = "healthy" }));
+app.MapGet("/research/health", () => Results.Ok(new { status = "healthy" }));
 
 app.MapPost("/chat",
-async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService, IAgentOrchestrator orchestrator, IInsightEngine insightEngine, IVaultAnalysisService vaultAnalysisService, IWorkspaceService workspaceService) =>
+async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService, IAgentOrchestrator orchestrator, IInsightEngine insightEngine, IVaultAnalysisService vaultAnalysisService, IWorkspaceService workspaceService, IResearchDirector researchDirector) =>
 {
     var overallStopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
@@ -665,10 +667,19 @@ User Query:
     var workspaceKeywords = new[] { "workspace", "vault", "what documents", "everything related to", "documents are related", "summarize my", "main topics" };
     bool needsWorkspace = workspaceKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
     
+    var researchKeywords = new[] { "analyze", "evaluate", "investigate", "assess", "review", "identify risks", "identify opportunities", "recommendations", "strengths and weaknesses", "executive report" };
+    bool needsResearchDirector = researchKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
+    string rdEnabledStr = Environment.GetEnvironmentVariable("ResearchDirector:Enabled") ?? "true";
+    bool isResearchDirectorEnabled = bool.TryParse(rdEnabledStr, out bool parsedRd) ? parsedRd : true;
+    
+    // If ResearchDirector takes it, we don't need regular insights to run redundantly
+    if (isResearchDirectorEnabled && needsResearchDirector) needsInsights = false;
+
     Console.WriteLine($"INSIGHT MODE ENABLED: {needsInsights}");
     Console.WriteLine($"WORKSPACE MODE ENABLED: {needsWorkspace}");
+    Console.WriteLine($"RESEARCH DIRECTOR ENABLED: {isResearchDirectorEnabled && needsResearchDirector}");
 
-    if (agentsEnabled && !needsInsights && !needsWorkspace)
+    if (agentsEnabled && !needsInsights && !needsWorkspace && !needsResearchDirector)
     {
         try
         {
@@ -703,7 +714,7 @@ User Query:
 
 
 
-    if (fullResponse == "" && !needsInsights && !needsWorkspace)
+    if (fullResponse == "" && !needsInsights && !needsWorkspace && !needsResearchDirector)
     {
         Console.WriteLine("FALLBACK ACTIVATED: CALLING AZURE OPENAI...");
         OpenAIPromptExecutionSettings settings =
@@ -733,7 +744,7 @@ User Query:
     }
 
     // Feature 5: Insight Engine (Phase 6)
-    if (isInsightsEnabled && needsInsights && !needsWorkspace)
+    if (isInsightsEnabled && needsInsights && !needsWorkspace && !needsResearchDirector)
     {
         try
         {
@@ -842,6 +853,57 @@ User Query:
         {
             Console.WriteLine($"WORKSPACE ENGINE FAILED: {ex.Message}");
             if (string.IsNullOrEmpty(fullResponse)) fullResponse = "Workspace Engine encountered an error during analysis: " + ex.Message;
+        }
+    }
+
+    // Feature 8: Autonomous Research (Phase 8)
+    if (isResearchDirectorEnabled && needsResearchDirector)
+    {
+        try
+        {
+            using var ctsResearch = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var researchResult = await researchDirector.ExecuteResearchAsync(connectionString, request.message, conversationHistory, ctsResearch.Token);
+
+            sources = researchResult.Sources;
+            var researchPlan = researchResult.Plan;
+            
+            string rText = $"\n\n--- Autonomous Research Report ---\n";
+            rText += $"**Objective**: {researchPlan.Objective}\n\n";
+            
+            if (researchPlan.Findings?.Count > 0)
+            {
+                rText += "**Key Findings:**\n";
+                foreach (var f in researchPlan.Findings) rText += $"- {f}\n";
+                rText += "\n";
+            }
+            
+            if (researchPlan.Recommendations?.Count > 0)
+            {
+                rText += "**Recommendations:**\n";
+                foreach (var r in researchPlan.Recommendations) rText += $"- {r}\n";
+                rText += "\n";
+            }
+
+            if (string.IsNullOrEmpty(fullResponse))
+            {
+                fullResponse = rText.Trim();
+            }
+            else
+            {
+                fullResponse += rText;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("RESEARCH DIRECTOR FAILED: Timeout. Falling back to standard pipeline...");
+            OpenAIPromptExecutionSettings settings = new() { Temperature = request.temperature ?? 1.0, TopP = request.topP ?? 0.95, MaxTokens = request.maxTokens ?? 1500, FrequencyPenalty = 0.2, PresencePenalty = 0.1 };
+            await foreach (var chunk in chatService.GetStreamingChatMessageContentsAsync(history, executionSettings: settings, kernel: kernel)) { if (chunk.Content != null) fullResponse += chunk.Content; }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"RESEARCH DIRECTOR FAILED: {ex.Message}. Falling back to standard pipeline...");
+            OpenAIPromptExecutionSettings settings = new() { Temperature = request.temperature ?? 1.0, TopP = request.topP ?? 0.95, MaxTokens = request.maxTokens ?? 1500, FrequencyPenalty = 0.2, PresencePenalty = 0.1 };
+            await foreach (var chunk in chatService.GetStreamingChatMessageContentsAsync(history, executionSettings: settings, kernel: kernel)) { if (chunk.Content != null) fullResponse += chunk.Content; }
         }
     }
 
