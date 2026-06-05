@@ -21,7 +21,7 @@ public class ComparisonAgent : IAgent
 
     public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken cancellationToken = default)
     {
-        Console.WriteLine("[Comparison Agent] STARTED");
+        Console.WriteLine("COMPARISON AGENT STARTED");
 
         string promptTemplate = await File.ReadAllTextAsync("Prompts/ComparisonAgentPrompt.txt", cancellationToken);
         
@@ -50,7 +50,7 @@ public class ComparisonAgent : IAgent
             
             if (agentResult != null)
             {
-                Console.WriteLine($"[Comparison Agent] COMPLETED (Confidence: {agentResult.Confidence})");
+                Console.WriteLine("COMPARISON AGENT COMPLETED");
                 return agentResult with { AgentName = Name };
             }
         }

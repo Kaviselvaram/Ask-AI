@@ -309,6 +309,7 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
     var plan = await plannerService.CreatePlanAsync(rewrittenQuery, intent);
     plannerStopwatch.Stop();
     
+    Console.WriteLine($"PLANNER TYPE: {intent}");
     Console.WriteLine($"PLAN STRATEGY: {plan.Strategy}");
     Console.WriteLine($"PLAN STEPS: {string.Join(", ", plan.Steps)}");
     Console.WriteLine($"Planning Latency: {plannerStopwatch.ElapsedMilliseconds} ms");
@@ -364,6 +365,7 @@ else
 }
 retrievalStopwatch.Stop();
 Console.WriteLine($"Retrieval Latency: {retrievalStopwatch.ElapsedMilliseconds} ms");
+Console.WriteLine($"RETRIEVED DOCUMENTS: {sources.Count}");
 
 // Removed hard short-circuit; we now trust the LLM to refuse based on system prompt.
 
@@ -587,6 +589,10 @@ User Query:
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            
+            Console.WriteLine("AGENT CONTEXT DOCUMENTS:");
+            foreach(var s in sources) { Console.WriteLine($"- {s.FileName}"); }
+            
             var agentContext = new AgentContext(
                 Query: request.message,
                 Intent: intent.ToString(),

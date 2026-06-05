@@ -21,7 +21,7 @@ public class ResearchAgent : IAgent
 
     public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken cancellationToken = default)
     {
-        Console.WriteLine("[Research Agent] STARTED");
+        Console.WriteLine("RESEARCH AGENT STARTED");
 
         string promptTemplate = await File.ReadAllTextAsync("Prompts/ResearchAgentPrompt.txt", cancellationToken);
         
@@ -49,7 +49,7 @@ public class ResearchAgent : IAgent
             
             if (agentResult != null)
             {
-                Console.WriteLine($"[Research Agent] COMPLETED (Confidence: {agentResult.Confidence})");
+                Console.WriteLine("RESEARCH AGENT COMPLETED");
                 return agentResult with { AgentName = Name };
             }
         }

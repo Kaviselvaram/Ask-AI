@@ -35,7 +35,7 @@ namespace backend.Services
                 PropertyNameCaseInsensitive = true
             };
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(2000));
 
             try
             {
@@ -75,7 +75,7 @@ namespace backend.Services
             }
             catch (OperationCanceledException)
             {
-                Console.WriteLine("PLANNER FAILED: Timeout exceeded 500ms");
+                Console.WriteLine("PLANNER FAILED: Timeout exceeded 2000ms");
             }
             catch (Exception ex)
             {
@@ -98,13 +98,16 @@ namespace backend.Services
                 _ => 5
             };
 
+            bool isComparison = intent == QueryIntent.Comparison;
+            bool isMulti = intent == QueryIntent.Comparison || intent == QueryIntent.Research;
+
             return new ExecutionPlan(
                 Goal: query,
                 Strategy: "FallbackStrategy",
                 Steps: new List<string> { "Retrieve fallback chunks", "Generate response" },
                 RecommendedChunkCount: defaultChunks,
-                RequiresComparison: false,
-                RequiresMultiDocumentReasoning: false,
+                RequiresComparison: isComparison,
+                RequiresMultiDocumentReasoning: isMulti,
                 RequiresKnowledgeGraph: false
             );
         }
