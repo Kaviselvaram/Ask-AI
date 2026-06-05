@@ -22,6 +22,7 @@ public class ResearchAgent : IAgent
     public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken cancellationToken = default)
     {
         Console.WriteLine("RESEARCH AGENT STARTED");
+        Console.WriteLine("RESEARCH AGENT INPUT:\n" + context.RetrievedContext);
 
         string promptTemplate = await File.ReadAllTextAsync("Prompts/ResearchAgentPrompt.txt", cancellationToken);
         

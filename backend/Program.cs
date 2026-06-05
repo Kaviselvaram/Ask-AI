@@ -103,6 +103,20 @@ string connectionString =
 Console.WriteLine("Connected to Azure SQL!");
 Console.WriteLine("SQL Connection String Loaded");
 
+try
+{
+    using var initConn = new SqlConnection(connectionString);
+    initConn.Open();
+    string alterSql = "ALTER TABLE QuestionCache ADD SourcesJson NVARCHAR(MAX) NULL;";
+    using var alterCmd = new SqlCommand(alterSql, initConn);
+    alterCmd.ExecuteNonQuery();
+    Console.WriteLine("Added SourcesJson column to QuestionCache");
+}
+catch
+{
+    // Column likely already exists
+}
+
 //
 // CREATE SEMANTIC KERNEL
 //
@@ -202,7 +216,7 @@ Console.WriteLine($"QUERY: {request.message}");
 Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
 
     string selectSql =
-        @"SELECT TOP 1 Answer
+        @"SELECT Answer, SourcesJson
         FROM QuestionCache
         WHERE Question = @Question";
 
@@ -234,8 +248,21 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
         );
     }
 
-    var cachedResult =
-        selectCommand.ExecuteScalar();
+    string cachedResult = null;
+    string cachedSourcesJson = null;
+
+    using (var reader = selectCommand.ExecuteReader())
+    {
+        if (reader.Read())
+        {
+            cachedResult = reader.GetString(0);
+            if (!reader.IsDBNull(1))
+            {
+                cachedSourcesJson = reader.GetString(1);
+            }
+        }
+    }
+
     Console.WriteLine("STEP 4");
     Console.WriteLine("ABOUT TO LOAD RewritePrompt.txt");
 
@@ -248,10 +275,14 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
             "CACHE HIT"
         );
 
+        var cachedSources = string.IsNullOrEmpty(cachedSourcesJson) 
+            ? new List<SourceInfo>() 
+            : JsonSerializer.Deserialize<List<SourceInfo>>(cachedSourcesJson);
+
         return Results.Ok(new
         {
-            result =
-                cachedResult.ToString()
+            result = cachedResult,
+            sources = cachedSources
         });
     }
 
@@ -365,7 +396,7 @@ else
 }
 retrievalStopwatch.Stop();
 Console.WriteLine($"Retrieval Latency: {retrievalStopwatch.ElapsedMilliseconds} ms");
-Console.WriteLine($"RETRIEVED DOCUMENTS: {sources.Count}");
+Console.WriteLine($"DOCUMENTS RETRIEVED: {sources.Count}");
 
 // Removed hard short-circuit; we now trust the LLM to refuse based on system prompt.
 
@@ -434,7 +465,8 @@ string embeddingString =
 string semanticSql =
     @"SELECT
         QuestionEmbedding,
-        Answer
+        Answer,
+        SourcesJson
       FROM QuestionCache
       WHERE QuestionEmbedding IS NOT NULL";
 
@@ -464,6 +496,7 @@ if (request.documentId.HasValue)
 Console.WriteLine("ABOUT TO QUERY SEMANTIC CACHE");
 double highestSimilarity = 0;
 string? bestAnswer = null;
+string? bestSourcesJson = null;
 
 using (SqlDataReader reader = semanticCommand.ExecuteReader())
 {
@@ -509,6 +542,15 @@ using (SqlDataReader reader = semanticCommand.ExecuteReader())
 
                 bestAnswer =
                     storedAnswer;
+
+                if (!reader.IsDBNull(2))
+                {
+                    bestSourcesJson = reader.GetString(2);
+                }
+                else
+                {
+                    bestSourcesJson = null;
+                }
             }
         }
         catch
@@ -532,9 +574,14 @@ if (
         "SEMANTIC CACHE HIT"
     );
 
+    var semanticSources = string.IsNullOrEmpty(bestSourcesJson)
+        ? new List<SourceInfo>()
+        : JsonSerializer.Deserialize<List<SourceInfo>>(bestSourcesJson);
+
     return Results.Ok(new
     {
         result = bestAnswer,
+        sources = semanticSources,
         chunksRetrieved = 1,
         similarityScore = highestSimilarity
     });
@@ -703,14 +750,16 @@ User Query:
             Question,
             QuestionEmbedding,
             Answer,
-            DocumentId
+            DocumentId,
+            SourcesJson
         )
         VALUES
         (
             @Question,
             @Embedding,
             @Answer,
-            @DocumentId
+            @DocumentId,
+            @SourcesJson
         )";
 
     if (!finalAnswer.Contains("Insufficient supporting evidence"))
@@ -739,6 +788,11 @@ User Query:
         insertCommand.Parameters.AddWithValue(
             "@DocumentId",
             (object)request.documentId ?? DBNull.Value
+        );
+
+        insertCommand.Parameters.AddWithValue(
+            "@SourcesJson",
+            JsonSerializer.Serialize(sources)
         );
 
         insertCommand.ExecuteNonQuery();
@@ -1119,11 +1173,11 @@ app.MapGet("/download/{documentId:int}", async (int documentId, HttpContext cont
     
     if (!System.IO.File.Exists(filePath)) 
     {
-        Console.WriteLine($"[DOWNLOAD ERROR] File not found on disk.");
-        Console.WriteLine($"DocumentId: {documentId}");
-        Console.WriteLine($"FileName: {fileName}");
-        Console.WriteLine($"Expected Path: {filePath}");
-        Console.WriteLine($"Exists: false");
+        Console.WriteLine("DOWNLOAD REQUESTED");
+        Console.WriteLine($"DOCUMENT ID: {documentId}");
+        Console.WriteLine($"FILE NAME: {fileName}");
+        Console.WriteLine($"EXPECTED PATH: {filePath}");
+        Console.WriteLine($"FILE EXISTS?: NO");
         return Results.NotFound(new { error = "File not found on disk.", path = filePath, fileName = fileName });
     }
     
@@ -1307,7 +1361,43 @@ double CosineSimilarity(
             }
         }
 
-        var filteredChunks = chunksData.Where(x => x.Score > 0.25).OrderByDescending(x => x.Score).Take(topChunks).ToList();
+        List<(string Text, double Score, int DocId, string FileName, int PageNumber)> filteredChunks;
+
+        if (requiresMultiDocumentReasoning)
+        {
+            var targetDocNames = chunksData.Select(x => x.FileName).Distinct()
+                .Where(fName => queryWords.Any(w => fName.ToLowerInvariant().Contains(w)))
+                .ToList();
+
+            Console.WriteLine($"DOCUMENTS DETECTED: {targetDocNames.Count}");
+            if (targetDocNames.Any())
+            {
+                Console.WriteLine("DOCUMENTS:");
+                foreach(var doc in targetDocNames) Console.WriteLine($"- {doc}");
+            }
+
+            var docsToRetrieve = targetDocNames.Any() 
+                ? targetDocNames 
+                : chunksData.GroupBy(x => x.FileName).OrderByDescending(g => g.Max(x => x.Score)).Take(2).Select(g => g.Key).ToList();
+
+            Console.WriteLine($"DOCUMENTS REQUESTED: {docsToRetrieve.Count}");
+
+            filteredChunks = new List<(string, double, int, string, int)>();
+            int chunksPerDoc = Math.Max(1, topChunks / Math.Max(1, docsToRetrieve.Count));
+
+            foreach (var doc in docsToRetrieve)
+            {
+                var docChunks = chunksData.Where(x => x.FileName == doc && x.Score > 0.25)
+                                          .OrderByDescending(x => x.Score)
+                                          .Take(chunksPerDoc)
+                                          .ToList();
+                filteredChunks.AddRange(docChunks);
+            }
+        }
+        else
+        {
+            filteredChunks = chunksData.Where(x => x.Score > 0.25).OrderByDescending(x => x.Score).Take(topChunks).ToList();
+        }
         
         var sources = new List<SourceInfo>();
         var finalChunks = new List<string>();
