@@ -674,7 +674,7 @@ User Query:
         }
     }
 
-    if (string.IsNullOrEmpty(fullResponse))
+    if (string.IsNullOrEmpty(fullResponse) && !needsInsights)
     {
         Console.WriteLine("FALLBACK ACTIVATED: CALLING AZURE OPENAI...");
         OpenAIPromptExecutionSettings settings =
@@ -740,11 +740,13 @@ User Query:
         catch (OperationCanceledException)
         {
             Console.WriteLine("INSIGHT ENGINE FAILED: Timeout");
+            if (string.IsNullOrEmpty(fullResponse)) fullResponse = "Insight Engine timed out while analyzing the vault.";
         }
         catch (Exception ex)
         {
             Console.WriteLine("INSIGHT ENGINE FAILED");
             Console.WriteLine($"[Insight Engine Error]: {ex.Message}");
+            if (string.IsNullOrEmpty(fullResponse)) fullResponse = "Insight Engine encountered an error during analysis: " + ex.Message;
         }
     }
 

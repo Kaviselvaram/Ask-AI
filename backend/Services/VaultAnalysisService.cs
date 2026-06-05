@@ -12,6 +12,9 @@ public class VaultAnalysisService : IVaultAnalysisService
     {
         Console.WriteLine("VAULT ANALYSIS MODE ENABLED");
         
+        using var isolatedConn = new SqlConnection(connection.ConnectionString);
+        await isolatedConn.OpenAsync();
+        
         var sources = new List<SourceInfo>();
         var vaultContextLines = new List<string>();
         
@@ -34,7 +37,8 @@ public class VaultAnalysisService : IVaultAnalysisService
             ORDER BY DocId, rn;
         ";
 
-        using var command = new SqlCommand(sql, connection);
+        using var command = new SqlCommand(sql, isolatedConn);
+        command.CommandTimeout = 120; // Allow 2 minutes for vault-wide query
         command.Parameters.AddWithValue("@ChunksPerDoc", chunksPerDocument);
 
         using var reader = await command.ExecuteReaderAsync();
