@@ -77,6 +77,9 @@ builder.Services.AddScoped<IAgent, ComparisonAgent>();
 builder.Services.AddScoped<IAgentOrchestrator, LightweightAgentOrchestrator>();
 builder.Services.AddScoped<IInsightEngine, InsightEngine>();
 builder.Services.AddScoped<IVaultAnalysisService, VaultAnalysisService>();
+builder.Services.AddScoped<IWorkspaceCatalogBuilder, WorkspaceCatalogBuilder>();
+builder.Services.AddScoped<IWorkspaceRelationshipEngine, WorkspaceRelationshipEngine>();
+builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();
 
 //
 // AZURE OPENAI CONFIG
@@ -180,7 +183,7 @@ var chatService =
 app.MapGet("/insights/health", () => Results.Ok(new { status = "healthy" }));
 
 app.MapPost("/chat",
-async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService, IAgentOrchestrator orchestrator, IInsightEngine insightEngine, IVaultAnalysisService vaultAnalysisService) =>
+async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService, IAgentOrchestrator orchestrator, IInsightEngine insightEngine, IVaultAnalysisService vaultAnalysisService, IWorkspaceService workspaceService) =>
 {
     var overallStopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
@@ -220,7 +223,17 @@ bool shouldSkipCache =
     ||
     query.Contains("insight")
     ||
-    query.Contains("themes");
+    query.Contains("themes")
+    ||
+    query.Contains("workspace")
+    ||
+    query.Contains("vault")
+    ||
+    query.Contains("what documents")
+    ||
+    query.Contains("everything related to")
+    ||
+    query.Contains("summarize my");
 
 Console.WriteLine($"QUERY: {request.message}");
 Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
@@ -649,9 +662,13 @@ User Query:
     var insightKeywords = new[] { "analyze", "insight", "patterns", "themes", "contradiction", "gaps", "duplicates" };
     bool needsInsights = insightKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
     
+    var workspaceKeywords = new[] { "workspace", "vault", "what documents", "everything related to", "documents are related", "summarize my", "main topics" };
+    bool needsWorkspace = workspaceKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
+    
     Console.WriteLine($"INSIGHT MODE ENABLED: {needsInsights}");
+    Console.WriteLine($"WORKSPACE MODE ENABLED: {needsWorkspace}");
 
-    if (agentsEnabled && !needsInsights)
+    if (agentsEnabled && !needsInsights && !needsWorkspace)
     {
         try
         {
@@ -684,7 +701,9 @@ User Query:
         }
     }
 
-    if (string.IsNullOrEmpty(fullResponse) && !needsInsights)
+
+
+    if (fullResponse == "" && !needsInsights && !needsWorkspace)
     {
         Console.WriteLine("FALLBACK ACTIVATED: CALLING AZURE OPENAI...");
         OpenAIPromptExecutionSettings settings =
@@ -714,7 +733,7 @@ User Query:
     }
 
     // Feature 5: Insight Engine (Phase 6)
-    if (isInsightsEnabled && needsInsights)
+    if (isInsightsEnabled && needsInsights && !needsWorkspace)
     {
         try
         {
@@ -764,7 +783,66 @@ User Query:
     }
     else
     {
-        if (isInsightsEnabled && !needsInsights) Console.WriteLine("INSIGHT ENGINE SKIPPED");
+        if (isInsightsEnabled && !needsInsights && !needsWorkspace) Console.WriteLine("INSIGHT ENGINE SKIPPED");
+    }
+
+    // Feature 6: Workspace Intelligence (Phase 7)
+    if (needsWorkspace)
+    {
+        try
+        {
+            using var ctsWorkspace = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var workspaceResult = await workspaceService.ProcessWorkspaceRequestAsync(connectionString, request.message, ctsWorkspace.Token);
+
+            sources = workspaceResult.AnalyzedSources;
+            
+            string wText = $"\n\n--- Workspace Summary ---\n";
+            wText += $"**Total Documents**: {workspaceResult.Summary.TotalDocuments}\n";
+            if (workspaceResult.Summary.Categories?.Count > 0)
+                wText += $"**Categories**: {string.Join(", ", workspaceResult.Summary.Categories)}\n\n";
+            wText += $"{workspaceResult.Summary.OverallSummary}\n\n";
+            
+            if (workspaceResult.Summary.Profiles?.Count > 0)
+            {
+                wText += "**Document Profiles:**\n";
+                foreach (var p in workspaceResult.Summary.Profiles)
+                {
+                    wText += $"- **{p.FileName}**\n";
+                    if (p.Topics?.Count > 0) wText += $"  *Topics*: {string.Join(", ", p.Topics)}\n";
+                    if (p.Entities?.Count > 0) wText += $"  *Entities*: {string.Join(", ", p.Entities)}\n";
+                }
+                wText += "\n";
+            }
+            
+            if (workspaceResult.Summary.Relationships?.Count > 0)
+            {
+                wText += "**Document Relationships:**\n";
+                foreach (var r in workspaceResult.Summary.Relationships)
+                {
+                    wText += $"- {r.SourceFileName} <-> {r.TargetFileName} ({r.RelationshipType})\n  *Context*: {r.SharedContext}\n";
+                }
+                wText += "\n";
+            }
+
+            if (string.IsNullOrEmpty(fullResponse))
+            {
+                fullResponse = wText.Trim();
+            }
+            else
+            {
+                fullResponse += wText;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("WORKSPACE ENGINE FAILED: Timeout");
+            if (string.IsNullOrEmpty(fullResponse)) fullResponse = "Workspace Engine timed out while analyzing the vault.";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"WORKSPACE ENGINE FAILED: {ex.Message}");
+            if (string.IsNullOrEmpty(fullResponse)) fullResponse = "Workspace Engine encountered an error during analysis: " + ex.Message;
+        }
     }
 
     // Feature 4: Verification Intelligence Layer
