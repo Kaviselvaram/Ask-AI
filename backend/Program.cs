@@ -80,6 +80,7 @@ builder.Services.AddScoped<IVaultAnalysisService, VaultAnalysisService>();
 builder.Services.AddScoped<IWorkspaceCatalogBuilder, WorkspaceCatalogBuilder>();
 builder.Services.AddScoped<IWorkspaceRelationshipEngine, WorkspaceRelationshipEngine>();
 builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();
+builder.Services.AddScoped<IResearchEvidenceCollector, ResearchEvidenceCollector>();
 builder.Services.AddScoped<IResearchDirector, ResearchDirector>();
 
 //
@@ -154,6 +155,8 @@ var embeddingService =
             Microsoft.Extensions.AI.Embedding<float>
         >
     >();
+builder.Services.AddSingleton(embeddingService);
+
 kernel.Plugins.AddFromType<StartupPlugin>();
 
 var app = builder.Build();
@@ -313,6 +316,11 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
 
     // Feature 5: Query Rewriter + Memory Injection
     string isMemoryEnabledStr = Environment.GetEnvironmentVariable("Memory:Enabled") ?? "true";
+    
+    //
+    // PHASE 8: AUTONOMOUS RESEARCH ROUTING
+    //
+    bool researchModeEnabled = Environment.GetEnvironmentVariable("RESEARCH_DIRECTOR_ENABLED") == "true";
     bool isMemoryEnabled = bool.TryParse(isMemoryEnabledStr, out bool parsed) ? parsed : true;
 
     string conversationHistory = "";
@@ -669,7 +677,9 @@ User Query:
     
     var researchKeywords = new[] { "analyze", "evaluate", "investigate", "assess", "review", "identify risks", "identify opportunities", "recommendations", "strengths and weaknesses", "executive report" };
     bool needsResearchDirector = researchKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
-    string rdEnabledStr = Environment.GetEnvironmentVariable("ResearchDirector:Enabled") ?? "true";
+    string wceEnabledStr = Environment.GetEnvironmentVariable("WorkspaceIntelligence:Enabled") ?? "true";
+    string rdEnabledStr = Environment.GetEnvironmentVariable("RESEARCH_DIRECTOR_ENABLED") ?? "true";
+    bool isWorkspaceIntelligenceEnabled = bool.TryParse(wceEnabledStr, out bool wceParsed) ? wceParsed : true;
     bool isResearchDirectorEnabled = bool.TryParse(rdEnabledStr, out bool parsedRd) ? parsedRd : true;
     
     // If ResearchDirector takes it, we don't need regular insights to run redundantly
@@ -861,7 +871,7 @@ User Query:
     {
         try
         {
-            using var ctsResearch = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var ctsResearch = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             var researchResult = await researchDirector.ExecuteResearchAsync(connectionString, request.message, conversationHistory, ctsResearch.Token);
 
             sources = researchResult.Sources;

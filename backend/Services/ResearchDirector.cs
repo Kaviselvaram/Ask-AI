@@ -15,18 +15,18 @@ public class ResearchDirector : IResearchDirector
 {
     private readonly IAgentOrchestrator _agentOrchestrator;
     private readonly IInsightEngine _insightEngine;
-    private readonly IVaultAnalysisService _vaultAnalysisService;
+    private readonly IResearchEvidenceCollector _evidenceCollector;
     private readonly Kernel _kernel;
 
     public ResearchDirector(
         IAgentOrchestrator agentOrchestrator,
         IInsightEngine insightEngine,
-        IVaultAnalysisService vaultAnalysisService,
+        IResearchEvidenceCollector evidenceCollector,
         Kernel kernel)
     {
         _agentOrchestrator = agentOrchestrator;
         _insightEngine = insightEngine;
-        _vaultAnalysisService = vaultAnalysisService;
+        _evidenceCollector = evidenceCollector;
         _kernel = kernel;
     }
 
@@ -35,21 +35,26 @@ public class ResearchDirector : IResearchDirector
         Console.WriteLine("RESEARCH DIRECTOR STARTED");
         Console.WriteLine("RESEARCH PLAN CREATED");
 
-        // 1. Gather Vault Context
-        var vaultAnalysisResult = await _vaultAnalysisService.BuildVaultContextAsync(connectionString, 3);
-        string vaultContext = vaultAnalysisResult.VaultContext;
+        // 1. Gather Evidence
+        var (evidenceContext, collectedSources, isSufficient) = await _evidenceCollector.CollectEvidenceAsync(connectionString, userQuery);
+        
+        if (!isSufficient)
+        {
+            Console.WriteLine("RESEARCH DIRECTOR FAILED: Insufficient Evidence");
+            return (new ResearchPlan { Objective = "Analyze Data", Findings = new List<string> { "Insufficient evidence available to generate reliable findings." } }, new List<SourceInfo>());
+        }
 
         // 2. Parallel Evidence Collection
         var agentContext = new AgentContext(
             Query: userQuery,
             Intent: "research comparison", // Forces both Research and Comparison agents
             ExecutionPlan: new ExecutionPlan("Aggregate Research", "Comprehensive", new List<string>(), 5, true, true, false),
-            RetrievedContext: vaultContext,
+            RetrievedContext: evidenceContext,
             ConversationContext: conversationHistory
         );
 
         Task<string> agentsTask = _agentOrchestrator.ExecuteAsync(agentContext, cancellationToken);
-        Task<InsightResult> insightTask = _insightEngine.AnalyzeAsync(vaultContext, userQuery, cancellationToken);
+        Task<InsightResult> insightTask = _insightEngine.AnalyzeAsync(evidenceContext, userQuery, cancellationToken);
 
         await Task.WhenAll(agentsTask, insightTask);
 
@@ -94,10 +99,32 @@ public class ResearchDirector : IResearchDirector
             plan = new ResearchPlan { Objective = "Analyze Data", Findings = new List<string> { "Failed to parse research data." } };
         }
 
+        // 4. Source Filtering
+        var finalSources = new List<SourceInfo>();
+        if (plan.EvidenceSources != null && plan.EvidenceSources.Count > 0)
+        {
+            foreach (var src in collectedSources)
+            {
+                if (plan.EvidenceSources.Any(e => e.Contains(src.FileName, StringComparison.OrdinalIgnoreCase) || src.FileName.Contains(e, StringComparison.OrdinalIgnoreCase)))
+                {
+                    finalSources.Add(src);
+                }
+            }
+        }
+        
+        // Fallback: If no EvidenceSources matched but we generated findings, include all collectedSources
+        if (finalSources.Count == 0 && plan.Findings != null && plan.Findings.Count > 0 && !plan.Findings[0].StartsWith("Insufficient"))
+        {
+            finalSources = collectedSources;
+        }
+
         Console.WriteLine("FINDINGS GENERATED");
         Console.WriteLine("RECOMMENDATIONS GENERATED");
+        Console.WriteLine("SOURCES USED");
+        foreach(var s in finalSources) Console.WriteLine($"- {s.FileName}");
+        Console.WriteLine("FINAL SOURCES RETURNED");
         Console.WriteLine("RESEARCH DIRECTOR COMPLETED");
 
-        return (plan, vaultAnalysisResult.AnalyzedSources);
+        return (plan, finalSources);
     }
 }
