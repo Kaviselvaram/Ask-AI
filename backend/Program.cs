@@ -397,7 +397,7 @@ else
 }
 retrievalStopwatch.Stop();
 Console.WriteLine($"Retrieval Latency: {retrievalStopwatch.ElapsedMilliseconds} ms");
-Console.WriteLine($"RETRIEVED DOCUMENTS: {sources.Count}");
+Console.WriteLine($"DOCUMENTS RETRIEVED: {sources.Count}");
 
 // Removed hard short-circuit; we now trust the LLM to refuse based on system prompt.
 
@@ -1388,7 +1388,7 @@ double CosineSimilarity(
 
             foreach (var doc in docsToRetrieve)
             {
-                var docChunks = chunksData.Where(x => x.FileName == doc && x.Score > 0.25)
+                var docChunks = chunksData.Where(x => x.FileName == doc && (targetDocNames.Contains(doc) || x.Score > 0.25))
                                           .OrderByDescending(x => x.Score)
                                           .Take(chunksPerDoc)
                                           .ToList();

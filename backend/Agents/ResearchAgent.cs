@@ -25,7 +25,7 @@ public class ResearchAgent : IAgent
         Console.WriteLine("RESEARCH AGENT INPUT:\n" + context.RetrievedContext);
         
         int inputDocs = context.RetrievedContext.Split(new[] { "Document " }, StringSplitOptions.None).Length - 1;
-        Console.WriteLine($"RESEARCH AGENT INPUTS: {inputDocs}");
+        Console.WriteLine($"RESEARCH AGENT INPUT DOCUMENTS: {inputDocs}");
 
         string promptTemplate = await File.ReadAllTextAsync("Prompts/ResearchAgentPrompt.txt", cancellationToken);
         
