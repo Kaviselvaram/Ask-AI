@@ -7,5 +7,5 @@ namespace backend.Services;
 
 public interface IVaultAnalysisService
 {
-    Task<(string VaultContext, List<SourceInfo> AnalyzedSources)> BuildVaultContextAsync(SqlConnection connection, int chunksPerDocument = 3);
+    Task<(string VaultContext, List<SourceInfo> AnalyzedSources)> BuildVaultContextAsync(string connectionString, int chunksPerDocument = 3);
 }

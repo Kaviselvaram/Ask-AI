@@ -719,7 +719,7 @@ User Query:
         try
         {
             Console.WriteLine("VAULT ANALYSIS SERVICE STARTED");
-            var vaultAnalysisResult = await vaultAnalysisService.BuildVaultContextAsync(connection, 3);
+            var vaultAnalysisResult = await vaultAnalysisService.BuildVaultContextAsync(connectionString, 3);
             string vaultContext = vaultAnalysisResult.VaultContext;
             
             // Override sources so all analyzed documents are shown in the frontend

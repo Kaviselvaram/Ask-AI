@@ -8,11 +8,11 @@ namespace backend.Services;
 
 public class VaultAnalysisService : IVaultAnalysisService
 {
-    public async Task<(string VaultContext, List<SourceInfo> AnalyzedSources)> BuildVaultContextAsync(SqlConnection connection, int chunksPerDocument = 3)
+    public async Task<(string VaultContext, List<SourceInfo> AnalyzedSources)> BuildVaultContextAsync(string connectionString, int chunksPerDocument = 3)
     {
         Console.WriteLine("VAULT ANALYSIS MODE ENABLED");
         
-        using var isolatedConn = new SqlConnection(connection.ConnectionString);
+        using var isolatedConn = new SqlConnection(connectionString);
         await isolatedConn.OpenAsync();
         
         var sources = new List<SourceInfo>();
