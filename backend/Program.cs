@@ -76,6 +76,7 @@ builder.Services.AddScoped<IAgent, ResearchAgent>();
 builder.Services.AddScoped<IAgent, ComparisonAgent>();
 builder.Services.AddScoped<IAgentOrchestrator, LightweightAgentOrchestrator>();
 builder.Services.AddScoped<IInsightEngine, InsightEngine>();
+builder.Services.AddScoped<IVaultAnalysisService, VaultAnalysisService>();
 
 //
 // AZURE OPENAI CONFIG
@@ -179,7 +180,7 @@ var chatService =
 app.MapGet("/insights/health", () => Results.Ok(new { status = "healthy" }));
 
 app.MapPost("/chat",
-async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService, IAgentOrchestrator orchestrator, IInsightEngine insightEngine) =>
+async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService, IAgentOrchestrator orchestrator, IInsightEngine insightEngine, IVaultAnalysisService vaultAnalysisService) =>
 {
     var overallStopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
@@ -708,8 +709,16 @@ User Query:
     {
         try
         {
+            var vaultAnalysisResult = await vaultAnalysisService.BuildVaultContextAsync(connection, 3);
+            string vaultContext = vaultAnalysisResult.VaultContext;
+            
+            // Override sources so all analyzed documents are shown in the frontend
+            sources = vaultAnalysisResult.AnalyzedSources;
+            // Override context so Verification can verify against the full vault context
+            context = vaultContext;
+            
             using var ctsInsight = new CancellationTokenSource(TimeSpan.FromMilliseconds(1000));
-            var insightResult = await insightEngine.AnalyzeAsync(context, ctsInsight.Token);
+            var insightResult = await insightEngine.AnalyzeAsync(vaultContext, ctsInsight.Token);
             
             if (insightResult != null && insightResult.Confidence > 0)
             {
