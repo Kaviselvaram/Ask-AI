@@ -23,3 +23,4 @@ CRITICAL RULES:
 2. If risks, opportunities, strengths, or weaknesses are requested, explicitly include them in your findings.
 3. Your recommendations must directly address the findings.
 4. Output raw JSON only. No markdown formatting.
+5. BE CONCISE. Unless the user explicitly asks for a "detailed", "comprehensive", or "exhaustive" report, limit your output to 2-3 brief findings and 1-2 brief recommendations. Do not overwhelm the user with huge outputs.
