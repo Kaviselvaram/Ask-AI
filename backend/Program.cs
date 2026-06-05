@@ -340,6 +340,7 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
     var plan = await plannerService.CreatePlanAsync(rewrittenQuery, intent);
     plannerStopwatch.Stop();
     
+    Console.WriteLine($"INTENT: {intent}");
     Console.WriteLine($"PLANNER TYPE: {intent}");
     Console.WriteLine($"PLAN STRATEGY: {plan.Strategy}");
     Console.WriteLine($"PLAN STEPS: {string.Join(", ", plan.Steps)}");
@@ -396,7 +397,7 @@ else
 }
 retrievalStopwatch.Stop();
 Console.WriteLine($"Retrieval Latency: {retrievalStopwatch.ElapsedMilliseconds} ms");
-Console.WriteLine($"DOCUMENTS RETRIEVED: {sources.Count}");
+Console.WriteLine($"RETRIEVED DOCUMENTS: {sources.Count}");
 
 // Removed hard short-circuit; we now trust the LLM to refuse based on system prompt.
 
@@ -637,7 +638,7 @@ User Query:
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
             
-            Console.WriteLine("AGENT CONTEXT DOCUMENTS:");
+            Console.WriteLine($"AGENT CONTEXT DOCUMENTS: {sources.Count}");
             foreach(var s in sources) { Console.WriteLine($"- {s.FileName}"); }
             
             var agentContext = new AgentContext(
@@ -1373,7 +1374,7 @@ double CosineSimilarity(
             if (targetDocNames.Any())
             {
                 Console.WriteLine("DOCUMENTS:");
-                foreach(var doc in targetDocNames) Console.WriteLine($"- {doc}");
+                foreach(var doc in targetDocNames) Console.WriteLine($"* {doc}");
             }
 
             var docsToRetrieve = targetDocNames.Any() 
@@ -1403,41 +1404,101 @@ double CosineSimilarity(
         var finalChunks = new List<string>();
         int totalPageRefs = 0;
 
-        foreach (var chunk in filteredChunks)
+        if (requiresMultiDocumentReasoning)
         {
-            if (chunk.DocId == 0 || chunk.FileName == "Unknown") continue;
-
-            var existingSource = sources.FirstOrDefault(s => s.DocumentId == chunk.DocId);
-            int currentRefId;
-
-            if (existingSource == null)
+            var groupedChunks = filteredChunks.GroupBy(c => new { c.DocId, c.FileName });
+            
+            foreach (var group in groupedChunks)
             {
-                int maxDocs = requiresMultiDocumentReasoning ? 10 : 1;
-                if (sources.Count >= maxDocs) continue; 
+                int maxDocs = 10;
+                if (sources.Count >= maxDocs) break;
                 
-                currentRefId = sources.Count + 1;
-                existingSource = new SourceInfo
+                var existingSource = sources.FirstOrDefault(s => s.DocumentId == group.Key.DocId);
+                int currentRefId;
+
+                if (existingSource == null)
                 {
-                    ReferenceId = currentRefId,
-                    DocumentId = chunk.DocId,
-                    FileName = chunk.FileName,
-                    DownloadUrl = $"/download/{chunk.DocId}"
-                };
-                sources.Add(existingSource);
+                    currentRefId = sources.Count + 1;
+                    existingSource = new SourceInfo
+                    {
+                        ReferenceId = currentRefId,
+                        DocumentId = group.Key.DocId,
+                        FileName = group.Key.FileName,
+                        DownloadUrl = $"/download/{group.Key.DocId}"
+                    };
+                    sources.Add(existingSource);
+                }
+                else
+                {
+                    currentRefId = existingSource.ReferenceId;
+                }
+                
+                var docChunksText = new List<string>();
+                docChunksText.Add($"Document {group.Key.FileName}");
+                
+                int chunkCount = 0;
+                foreach (var chunk in group)
+                {
+                    if (chunk.DocId == 0 || chunk.FileName == "Unknown") continue;
+                    
+                    if (totalPageRefs < 5 && !existingSource.Pages.Contains(chunk.PageNumber))
+                    {
+                        existingSource.Pages.Add(chunk.PageNumber);
+                        totalPageRefs++;
+                    }
+                    
+                    docChunksText.Add($"-> {chunk.Text}");
+                    chunkCount++;
+                }
+                
+                if (chunkCount > 0)
+                {
+                    finalChunks.Add(string.Join("\n", docChunksText));
+                    string cleanDocName = group.Key.FileName.Replace(".pdf", "").Replace(".docx", "").ToUpperInvariant();
+                    string[] words = cleanDocName.Split(new[] { '_', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    string prefix = words.Length > 0 ? words[0] : cleanDocName;
+                    Console.WriteLine($"{prefix} CHUNKS: {chunkCount}");
+                }
             }
-            else
+        }
+        else
+        {
+            foreach (var chunk in filteredChunks)
             {
-                currentRefId = existingSource.ReferenceId;
-            }
+                if (chunk.DocId == 0 || chunk.FileName == "Unknown") continue;
 
-            if (totalPageRefs < 5 && !existingSource.Pages.Contains(chunk.PageNumber))
-            {
-                existingSource.Pages.Add(chunk.PageNumber);
-                totalPageRefs++;
-            }
+                var existingSource = sources.FirstOrDefault(s => s.DocumentId == chunk.DocId);
+                int currentRefId;
 
-            string formattedChunk = $"[Source {currentRefId}: {chunk.FileName} | Page: {chunk.PageNumber}]\n{chunk.Text}";
-            finalChunks.Add(formattedChunk);
+                if (existingSource == null)
+                {
+                    int maxDocs = 1;
+                    if (sources.Count >= maxDocs) continue; 
+                    
+                    currentRefId = sources.Count + 1;
+                    existingSource = new SourceInfo
+                    {
+                        ReferenceId = currentRefId,
+                        DocumentId = chunk.DocId,
+                        FileName = chunk.FileName,
+                        DownloadUrl = $"/download/{chunk.DocId}"
+                    };
+                    sources.Add(existingSource);
+                }
+                else
+                {
+                    currentRefId = existingSource.ReferenceId;
+                }
+
+                if (totalPageRefs < 5 && !existingSource.Pages.Contains(chunk.PageNumber))
+                {
+                    existingSource.Pages.Add(chunk.PageNumber);
+                    totalPageRefs++;
+                }
+
+                string formattedChunk = $"[Source {currentRefId}: {chunk.FileName} | Page: {chunk.PageNumber}]\n{chunk.Text}";
+                finalChunks.Add(formattedChunk);
+            }
         }
 
         double avgScore = filteredChunks.Any() ? filteredChunks.Average(x => x.Score) : 0;

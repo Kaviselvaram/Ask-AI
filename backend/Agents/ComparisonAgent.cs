@@ -23,6 +23,9 @@ public class ComparisonAgent : IAgent
     {
         Console.WriteLine("COMPARISON AGENT STARTED");
         Console.WriteLine("COMPARISON AGENT INPUT:\n" + context.RetrievedContext + "\nPREVIOUS OUTPUT:\n" + context.PreviousAgentOutput);
+        
+        int inputDocs = context.RetrievedContext.Split(new[] { "Document " }, StringSplitOptions.None).Length - 1;
+        Console.WriteLine($"COMPARISON AGENT INPUTS: {inputDocs}");
 
         string promptTemplate = await File.ReadAllTextAsync("Prompts/ComparisonAgentPrompt.txt", cancellationToken);
         
