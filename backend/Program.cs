@@ -71,6 +71,7 @@ builder.Services.AddScoped<IMemoryService>(sp => {
     return new MemoryService(connStr, kernel);
 });
 builder.Services.AddSingleton<RetrievalStrategyFactory>();
+builder.Services.AddScoped<IVerificationService, VerificationService>();
 
 //
 // AZURE OPENAI CONFIG
@@ -174,7 +175,7 @@ var orchestrator = new AgentOrchestrator(classifier, planner, reportGenerator, a
 //
 
 app.MapPost("/chat",
-async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService) =>
+async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService) =>
 {
     var overallStopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
@@ -642,13 +643,56 @@ Console.WriteLine("CALLING AZURE OPENAI...");
     }
 Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
 
+    // Feature 4: Verification Intelligence Layer
+    string finalAnswer = fullResponse;
+    string verificationEnabledStr = Environment.GetEnvironmentVariable("Verification:Enabled") ?? "true";
+    bool isVerificationEnabled = bool.TryParse(verificationEnabledStr, out bool parsedVer) ? parsedVer : true;
+
+    if (isVerificationEnabled)
+    {
+        Console.WriteLine("VERIFICATION STARTED");
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(700));
+            var verificationResult = await verificationService.VerifyAsync(fullResponse, context, cts.Token);
+            
+            Console.WriteLine("VERIFICATION COMPLETED");
+            Console.WriteLine($"CONFIDENCE SCORE: {verificationResult.Confidence}");
+            Console.WriteLine($"SUPPORTED CLAIMS COUNT: {verificationResult.SupportedClaims?.Count ?? 0}");
+            Console.WriteLine($"UNSUPPORTED CLAIMS COUNT: {verificationResult.UnsupportedClaims?.Count ?? 0}");
+
+            if (verificationResult.Confidence >= 0.8)
+            {
+                finalAnswer = fullResponse;
+            }
+            else if (verificationResult.Confidence >= 0.5)
+            {
+                finalAnswer = fullResponse + "\n\n*Note: Some information may require verification.*";
+            }
+            else
+            {
+                finalAnswer = verificationResult.SafeAnswer ?? fullResponse;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("VERIFICATION FAILED: Timeout");
+            finalAnswer = fullResponse;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"VERIFICATION FAILED: {ex.Message}");
+            finalAnswer = fullResponse;
+        }
+    }
+
     history.AddAssistantMessage(
-        fullResponse
+        finalAnswer
     );
 
     if (isMemoryEnabled && !string.IsNullOrEmpty(request.conversationId))
     {
-        await memoryService.SaveMessageAsync(request.conversationId, "Assistant", fullResponse);
+        await memoryService.SaveMessageAsync(request.conversationId, "Assistant", finalAnswer);
     }
     string insertSql =
         @"INSERT INTO QuestionCache
@@ -666,7 +710,7 @@ Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
             @DocumentId
         )";
 
-    if (!fullResponse.Contains("Insufficient supporting evidence"))
+    if (!finalAnswer.Contains("Insufficient supporting evidence"))
     {
         using SqlCommand insertCommand =
             new SqlCommand(
@@ -686,7 +730,7 @@ Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
 
         insertCommand.Parameters.AddWithValue(
             "@Answer",
-            fullResponse
+            finalAnswer
         );
 
         insertCommand.Parameters.AddWithValue(
@@ -706,7 +750,7 @@ Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
 
     return Results.Ok(new
     {
-        result = fullResponse,
+        result = finalAnswer,
         sources = sources,
         chunksRetrieved = relevantChunks.Count,
         similarityScore = confidenceScore / 100.0
@@ -1129,6 +1173,11 @@ app.MapGet("/planner/health", () =>
 });
 
 app.MapGet("/memory/health", () =>
+{
+    return Results.Ok(new { status = "healthy" });
+});
+
+app.MapGet("/verification/health", () =>
 {
     return Results.Ok(new { status = "healthy" });
 });
