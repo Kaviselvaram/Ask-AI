@@ -17,7 +17,7 @@ public class InsightEngine : IInsightEngine
         _kernel = kernel;
     }
 
-    public async Task<InsightResult> AnalyzeAsync(string context, CancellationToken cancellationToken = default)
+    public async Task<InsightResult> AnalyzeAsync(string context, string userQuery, CancellationToken cancellationToken = default)
     {
         Console.WriteLine("INSIGHT ENGINE STARTED");
 
@@ -34,7 +34,8 @@ public class InsightEngine : IInsightEngine
 
             var arguments = new KernelArguments(promptSettings)
             {
-                ["context"] = context
+                ["context"] = context,
+                ["query"] = userQuery
             };
 
             var result = await _kernel.InvokePromptAsync(promptTemplate, arguments, templateFormat: "semantic-kernel", cancellationToken: cancellationToken);

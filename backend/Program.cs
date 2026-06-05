@@ -729,7 +729,7 @@ User Query:
             
             using var ctsInsight = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             Console.WriteLine("INSIGHT ENGINE STARTED");
-            var insightResult = await insightEngine.AnalyzeAsync(vaultContext, ctsInsight.Token);
+            var insightResult = await insightEngine.AnalyzeAsync(vaultContext, request.message, ctsInsight.Token);
             Console.WriteLine("INSIGHT ENGINE COMPLETED");
             
             if (insightResult != null && insightResult.Confidence > 0)

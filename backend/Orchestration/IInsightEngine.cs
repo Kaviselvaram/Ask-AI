@@ -6,5 +6,5 @@ namespace backend.Orchestration;
 
 public interface IInsightEngine
 {
-    Task<InsightResult> AnalyzeAsync(string context, CancellationToken cancellationToken = default);
+    Task<InsightResult> AnalyzeAsync(string context, string userQuery, CancellationToken cancellationToken = default);
 }

@@ -9,3 +9,8 @@ Identify:
 
 Context:
 {{$context}}
+
+User Query:
+{{$query}}
+
+CRITICAL INSTRUCTION: Analyze ONLY the documents and chunks within the context that are relevant to the User Query. If the User Query specifies certain documents (e.g., "AIOS documents"), completely ignore all other documents in the context.
