@@ -72,7 +72,7 @@ class RepairProgram
             }
         }
         
-        Console.WriteLine("\n--- DIAGNOSTIC RESULTS ---");
+        Console.WriteLine("\nDIAGNOSTIC RESULTS");
         Console.WriteLine($"Total DB 'Latest' Documents: {dbFiles.Count}");
         Console.WriteLine($"Total Disk Files in Uploads: {diskFiles.Count}");
         

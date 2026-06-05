@@ -774,7 +774,7 @@ User Query:
             
             if (insightResult != null && insightResult.Confidence > 0)
             {
-                string insightsText = "\n\n--- Insights ---\n";
+                string insightsText = "";
                 if (insightResult.Themes?.Count > 0) insightsText += $"Themes:\n- {string.Join("\n- ", insightResult.Themes)}\n\n";
                 if (insightResult.Contradictions?.Count > 0) insightsText += $"Contradictions:\n- {string.Join("\n- ", insightResult.Contradictions)}\n\n";
                 if (insightResult.Gaps?.Count > 0) insightsText += $"Gaps:\n- {string.Join("\n- ", insightResult.Gaps)}\n\n";
@@ -817,7 +817,7 @@ User Query:
 
             sources = workspaceResult.AnalyzedSources;
             
-            string wText = $"\n\n--- Workspace Summary ---\n";
+            string wText = "";
             wText += $"**Total Documents**: {workspaceResult.Summary.TotalDocuments}\n";
             if (workspaceResult.Summary.Categories?.Count > 0)
                 wText += $"**Categories**: {string.Join(", ", workspaceResult.Summary.Categories)}\n\n";
@@ -877,7 +877,7 @@ User Query:
             sources = researchResult.Sources;
             var researchPlan = researchResult.Plan;
             
-            string rText = $"\n\n--- Autonomous Research Report ---\n";
+            string rText = "";
             rText += $"**Objective**: {researchPlan.Objective}\n\n";
             
             if (researchPlan.Findings?.Count > 0)
