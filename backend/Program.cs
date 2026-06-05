@@ -792,6 +792,48 @@ User Query:
         }
     }
 
+    // EVIDENCE-BASED SOURCE ATTRIBUTION
+    Console.WriteLine($"QUERY TYPE: {(needsInsights ? "Vault Analysis" : "Standard Retrieval")}");
+    Console.WriteLine($"DOCUMENTS RETRIEVED: {sources.Count}");
+    
+    var finalSources = new List<SourceInfo>();
+
+    if (isInsightsEnabled && needsInsights)
+    {
+        Console.WriteLine($"DOCUMENTS ANALYZED: {sources.Count}");
+        finalSources = sources;
+    }
+    else
+    {
+        Console.WriteLine($"DOCUMENTS ANALYZED: {sources.Count}");
+        foreach (var src in sources)
+        {
+            string nameWithoutExt = Path.GetFileNameWithoutExtension(src.FileName);
+            string[] nameParts = nameWithoutExt.Split(new[] { ' ', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+            
+            bool isExplicitlyTargeted = request.message.Contains(src.FileName, StringComparison.OrdinalIgnoreCase) || 
+                                        request.message.Contains(nameWithoutExt, StringComparison.OrdinalIgnoreCase);
+            
+            bool isExplicitlyCited = finalAnswer.Contains(src.FileName, StringComparison.OrdinalIgnoreCase) || 
+                                     finalAnswer.Contains(nameWithoutExt, StringComparison.OrdinalIgnoreCase);
+
+            bool isPartiallyTargeted = nameParts.Length > 0 && nameParts.Any(p => p.Length > 3 && 
+                (request.message.Contains(p, StringComparison.OrdinalIgnoreCase) || finalAnswer.Contains(p, StringComparison.OrdinalIgnoreCase)));
+
+            if (isExplicitlyTargeted || isExplicitlyCited || isPartiallyTargeted)
+            {
+                if (!finalSources.Any(s => s.DocumentId == src.DocumentId))
+                {
+                    finalSources.Add(src);
+                }
+            }
+        }
+    }
+
+    Console.WriteLine($"DOCUMENTS USED IN FINAL ANSWER: {finalSources.Count}");
+    Console.WriteLine($"SOURCES RETURNED: {finalSources.Count}");
+    sources = finalSources;
+
     history.AddAssistantMessage(
         finalAnswer
     );
