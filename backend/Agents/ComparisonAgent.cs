@@ -1,55 +1,64 @@
 using System;
-using System.Linq;
+using System.IO;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
-using backend.Models;
 using Microsoft.SemanticKernel;
+using backend.Models;
 
-namespace backend.Agents
+namespace backend.Agents;
+
+public class ComparisonAgent : IAgent
 {
-    public class ComparisonAgent : BaseAgent
+    private readonly Kernel _kernel;
+
+    public string Name => "Comparison";
+
+    public ComparisonAgent(Kernel kernel)
     {
-        private readonly Kernel _kernel;
+        _kernel = kernel;
+    }
 
-        public override string AgentName => "comparison";
+    public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken cancellationToken = default)
+    {
+        Console.WriteLine("[Comparison Agent] STARTED");
 
-        public ComparisonAgent(Kernel kernel)
+        string promptTemplate = await File.ReadAllTextAsync("Prompts/ComparisonAgentPrompt.txt", cancellationToken);
+        
+        var arguments = new KernelArguments()
         {
-            _kernel = kernel;
-        }
+            ["query"] = context.Query,
+            ["context"] = context.RetrievedContext,
+            ["previous_output"] = context.PreviousAgentOutput
+        };
 
-        public override async Task ExecuteAsync(AgentState state)
+        var promptSettings = new Microsoft.SemanticKernel.Connectors.OpenAI.OpenAIPromptExecutionSettings
         {
-            Console.WriteLine($"[Agent: {AgentName}] Executing comparison");
+            ResponseFormat = typeof(AgentResult),
+            Temperature = 0.2, 
+            MaxTokens = 1500
+        };
 
-            string contextStr = string.Join("\n\n", state.Evidence.Select(e => e.ChunkText));
-            if (string.IsNullOrWhiteSpace(contextStr)) return;
+        var result = await _kernel.InvokePromptAsync(promptTemplate, arguments, templateFormat: "semantic-kernel", cancellationToken: cancellationToken);
+        
+        string resultJson = result.GetValue<string>() ?? "{}";
 
-            string prompt = $@"
-You are a Comparison Analyst Agent.
-Compare the following documents or clauses based on the user's query.
-Identify explicitly:
-- Agreements
-- Conflicts/Contradictions
-- Additions
-- Removals
-
-Context:
-{contextStr}
-
-User Query:
-{state.OriginalQuery}
-
-Return your comparison findings clearly structured.";
-
-            var result = await _kernel.InvokePromptAsync(prompt);
-            string findings = result.GetValue<string>()?.Trim() ?? string.Empty;
-
-            state.Evidence.Add(new EvidenceNode
+        try
+        {
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var agentResult = JsonSerializer.Deserialize<AgentResult>(resultJson, options);
+            
+            if (agentResult != null)
             {
-                SourceAgent = AgentName,
-                Findings = findings,
-                Confidence = 90
-            });
+                Console.WriteLine($"[Comparison Agent] COMPLETED (Confidence: {agentResult.Confidence})");
+                return agentResult with { AgentName = Name };
+            }
         }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Comparison Agent] FAILED: {ex.Message}");
+        }
+
+        return new AgentResult(Name, "Comparison could not be completed.", 0.0);
     }
 }

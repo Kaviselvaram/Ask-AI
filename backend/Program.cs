@@ -72,6 +72,9 @@ builder.Services.AddScoped<IMemoryService>(sp => {
 });
 builder.Services.AddSingleton<RetrievalStrategyFactory>();
 builder.Services.AddScoped<IVerificationService, VerificationService>();
+builder.Services.AddScoped<IAgent, ResearchAgent>();
+builder.Services.AddScoped<IAgent, ComparisonAgent>();
+builder.Services.AddScoped<IAgentOrchestrator, LightweightAgentOrchestrator>();
 
 //
 // AZURE OPENAI CONFIG
@@ -152,30 +155,14 @@ var chatService =
     kernel.GetRequiredService<IChatCompletionService>();
 
 // Agent Orchestration Setup
-var retrievalService = new RetrievalService(embeddingService, connectionString);
-var graphService = new GraphService(connectionString);
-
-var classifier = new TaskClassifier(kernel);
-var planner = new DynamicPlanner(kernel);
-var reportGenerator = new ReportGenerator(kernel);
-
-var agents = new List<BaseAgent>
-{
-    new ResearchAgent(retrievalService, graphService),
-    new ComparisonAgent(kernel),
-    new RiskAnalysisAgent(kernel),
-    new ExecutiveSummaryAgent(kernel),
-    new VerificationAgent(kernel)
-};
-
-var orchestrator = new AgentOrchestrator(classifier, planner, reportGenerator, agents);
+// Removed legacy complex agents to implement Phase 5 Lightweight.
 
 //
 // CHAT ENDPOINT
 //
 
 app.MapPost("/chat",
-async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService) =>
+async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService, IAgentOrchestrator orchestrator) =>
 {
     var overallStopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
@@ -331,24 +318,7 @@ Console.WriteLine($"SKIP CACHE: {shouldSkipCache}");
     bool useVectorSearch = strategy.UseVectorSearch;
     if (plan.Strategy == "MetadataLookup") useVectorSearch = false;
 
-    // NEW: CLASSIFICATION ROUTING
-    var classification = await classifier.ClassifyTaskAsync(rewrittenQuery);
-    if (classification.TaskType != "SimpleRetrieval" && classification.Confidence > 60 && plan.Strategy != "MetadataLookup")
-    {
-        var agentState = await orchestrator.ExecuteAsync(request.message, request.documentId, conversationHistory, recentEntities);
-        
-        if (isMemoryEnabled && !string.IsNullOrEmpty(request.conversationId))
-        {
-            await memoryService.SaveMessageAsync(request.conversationId, "Assistant", agentState.FinalReport);
-        }
-
-        return Results.Ok(new {
-            result = agentState.FinalReport,
-            sources = agentState.Sources.Distinct().ToList(),
-            chunksRetrieved = agentState.Evidence.Count,
-            similarityScore = agentState.GlobalConfidenceScore / 100.0
-        });
-    }
+    // NEW: CLASSIFICATION ROUTING removed for Lightweight Agent Orchestrator integration
 
 var retrievalStopwatch = System.Diagnostics.Stopwatch.StartNew();
 List<string> relevantChunks = new List<string>();
@@ -609,39 +579,66 @@ User Query:
 
 
 
-Console.WriteLine("CALLING AZURE OPENAI...");
-    OpenAIPromptExecutionSettings settings =
-        new()
-        {
-            FunctionChoiceBehavior =
-                FunctionChoiceBehavior.Auto(),
-
-            Temperature = request.temperature ?? 1.0,
-
-            TopP = request.topP ?? 0.95,
-
-            MaxTokens = request.maxTokens ?? 1500,
-
-            FrequencyPenalty = 0.2,
-
-            PresencePenalty = 0.1
-        };
-
     var fullResponse = "";
-
-    await foreach (var chunk in
-        chatService.GetStreamingChatMessageContentsAsync(
-            history,
-            executionSettings: settings,
-            kernel: kernel
-        ))
+    bool agentsEnabled = bool.TryParse(Environment.GetEnvironmentVariable("Agents:Enabled") ?? "true", out bool ae) ? ae : true;
+    
+    if (agentsEnabled)
     {
-        if (chunk.Content != null)
+        try
         {
-            fullResponse += chunk.Content;
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            var agentContext = new AgentContext(
+                Query: request.message,
+                Intent: intent.ToString(),
+                ExecutionPlan: plan,
+                RetrievedContext: context,
+                ConversationContext: conversationHistory
+            );
+            
+            var orchestratorResult = await orchestrator.ExecuteAsync(agentContext, cts.Token);
+            if (!string.IsNullOrEmpty(orchestratorResult))
+            {
+                fullResponse = orchestratorResult;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("AGENT ORCHESTRATOR FAILED: Timeout");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"AGENT ORCHESTRATOR FAILED: {ex.Message}");
         }
     }
-Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
+
+    if (string.IsNullOrEmpty(fullResponse))
+    {
+        Console.WriteLine("FALLBACK ACTIVATED: CALLING AZURE OPENAI...");
+        OpenAIPromptExecutionSettings settings =
+            new()
+            {
+                FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
+                Temperature = request.temperature ?? 1.0,
+                TopP = request.topP ?? 0.95,
+                MaxTokens = request.maxTokens ?? 1500,
+                FrequencyPenalty = 0.2,
+                PresencePenalty = 0.1
+            };
+
+        await foreach (var chunk in
+            chatService.GetStreamingChatMessageContentsAsync(
+                history,
+                executionSettings: settings,
+                kernel: kernel
+            ))
+        {
+            if (chunk.Content != null)
+            {
+                fullResponse += chunk.Content;
+            }
+        }
+        Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
+    }
 
     // Feature 4: Verification Intelligence Layer
     string finalAnswer = fullResponse;
@@ -1178,6 +1175,11 @@ app.MapGet("/memory/health", () =>
 });
 
 app.MapGet("/verification/health", () =>
+{
+    return Results.Ok(new { status = "healthy" });
+});
+
+app.MapGet("/agents/health", () =>
 {
     return Results.Ok(new { status = "healthy" });
 });

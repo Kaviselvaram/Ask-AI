@@ -1,58 +1,63 @@
 using System;
-using System.Linq;
+using System.IO;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.SemanticKernel;
 using backend.Models;
-using backend.Services;
 
-namespace backend.Agents
+namespace backend.Agents;
+
+public class ResearchAgent : IAgent
 {
-    public class ResearchAgent : BaseAgent
+    private readonly Kernel _kernel;
+
+    public string Name => "Research";
+
+    public ResearchAgent(Kernel kernel)
     {
-        private readonly RetrievalService _retrievalService;
-        private readonly GraphService _graphService;
+        _kernel = kernel;
+    }
 
-        public override string AgentName => "research";
+    public async Task<AgentResult> ExecuteAsync(AgentContext context, CancellationToken cancellationToken = default)
+    {
+        Console.WriteLine("[Research Agent] STARTED");
 
-        public ResearchAgent(RetrievalService retrievalService, GraphService graphService)
+        string promptTemplate = await File.ReadAllTextAsync("Prompts/ResearchAgentPrompt.txt", cancellationToken);
+        
+        var arguments = new KernelArguments()
         {
-            _retrievalService = retrievalService;
-            _graphService = graphService;
-        }
+            ["query"] = context.Query,
+            ["context"] = context.RetrievedContext
+        };
 
-        public override async Task ExecuteAsync(AgentState state)
+        var promptSettings = new Microsoft.SemanticKernel.Connectors.OpenAI.OpenAIPromptExecutionSettings
         {
-            Console.WriteLine($"[Agent: {AgentName}] Executing research for query: {state.OriginalQuery}");
+            ResponseFormat = typeof(AgentResult),
+            Temperature = 0.2, 
+            MaxTokens = 1500
+        };
 
-            var (chunks, sources, confidence) = await _retrievalService.GetRelevantChunksAsync(state.RewrittenQuery);
+        var result = await _kernel.InvokePromptAsync(promptTemplate, arguments, templateFormat: "semantic-kernel", cancellationToken: cancellationToken);
+        
+        string resultJson = result.GetValue<string>() ?? "{}";
 
-            if (sources != null && sources.Any())
+        try
+        {
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var agentResult = JsonSerializer.Deserialize<AgentResult>(resultJson, options);
+            
+            if (agentResult != null)
             {
-                state.Sources.AddRange(sources);
-            }
-
-            foreach (var chunk in chunks)
-            {
-                state.Evidence.Add(new EvidenceNode
-                {
-                    SourceAgent = AgentName,
-                    ChunkText = chunk,
-                    Confidence = confidence
-                });
-            }
-
-            // Extract keywords for Graph
-            var words = state.RewrittenQuery.Split(' ').Where(w => w.Length > 4).ToList();
-            string graphContext = await _graphService.GetGraphContextAsync(words);
-
-            if (!string.IsNullOrEmpty(graphContext))
-            {
-                state.Evidence.Add(new EvidenceNode
-                {
-                    SourceAgent = AgentName + "_graph",
-                    ChunkText = graphContext,
-                    Confidence = 100
-                });
+                Console.WriteLine($"[Research Agent] COMPLETED (Confidence: {agentResult.Confidence})");
+                return agentResult with { AgentName = Name };
             }
         }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Research Agent] FAILED: {ex.Message}");
+        }
+
+        return new AgentResult(Name, "Research could not be completed.", 0.0);
     }
 }
