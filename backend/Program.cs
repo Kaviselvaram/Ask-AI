@@ -636,7 +636,12 @@ User Query:
     var fullResponse = "";
     bool agentsEnabled = bool.TryParse(Environment.GetEnvironmentVariable("Agents:Enabled") ?? "true", out bool ae) ? ae : true;
     
-    if (agentsEnabled)
+    string insightsEnabledStr = Environment.GetEnvironmentVariable("Insights:Enabled") ?? "true";
+    bool isInsightsEnabled = bool.TryParse(insightsEnabledStr, out bool parsedIns) ? parsedIns : true;
+    var insightKeywords = new[] { "analyze", "insight", "patterns", "themes", "contradiction", "gaps", "duplicates" };
+    bool needsInsights = insightKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
+    
+    if (agentsEnabled && !needsInsights)
     {
         try
         {
@@ -699,12 +704,6 @@ User Query:
     }
 
     // Feature 5: Insight Engine (Phase 6)
-    string insightsEnabledStr = Environment.GetEnvironmentVariable("Insights:Enabled") ?? "true";
-    bool isInsightsEnabled = bool.TryParse(insightsEnabledStr, out bool parsedIns) ? parsedIns : true;
-
-    var insightKeywords = new[] { "analyze", "insight", "patterns", "themes", "contradiction", "gaps", "duplicates" };
-    bool needsInsights = insightKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
-
     if (isInsightsEnabled && needsInsights)
     {
         try
@@ -717,7 +716,7 @@ User Query:
             // Override context so Verification can verify against the full vault context
             context = vaultContext;
             
-            using var ctsInsight = new CancellationTokenSource(TimeSpan.FromMilliseconds(1000));
+            using var ctsInsight = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             var insightResult = await insightEngine.AnalyzeAsync(vaultContext, ctsInsight.Token);
             
             if (insightResult != null && insightResult.Confidence > 0)

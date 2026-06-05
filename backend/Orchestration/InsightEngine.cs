@@ -25,16 +25,16 @@ public class InsightEngine : IInsightEngine
         {
             string promptTemplate = await File.ReadAllTextAsync("Prompts/InsightEnginePrompt.txt", cancellationToken);
             
-            var arguments = new KernelArguments()
-            {
-                ["context"] = context
-            };
-
             var promptSettings = new Microsoft.SemanticKernel.Connectors.OpenAI.OpenAIPromptExecutionSettings
             {
                 ResponseFormat = typeof(InsightResult),
                 Temperature = 0.2, 
                 MaxTokens = 1500
+            };
+
+            var arguments = new KernelArguments(promptSettings)
+            {
+                ["context"] = context
             };
 
             var result = await _kernel.InvokePromptAsync(promptTemplate, arguments, templateFormat: "semantic-kernel", cancellationToken: cancellationToken);
