@@ -1,5 +1,6 @@
 #pragma warning disable SKEXP0010
 
+using Azure.Storage.Blobs;
 using dotenv.net;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -106,6 +107,16 @@ string connectionString =
     Environment.GetEnvironmentVariable(
         "SQL_CONNECTION_STRING")!
     + ";Pooling=false";
+
+string blobConnectionString = 
+    Environment.GetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING") ?? "";
+BlobServiceClient? blobServiceClient = null;
+if (!string.IsNullOrEmpty(blobConnectionString))
+{
+    blobServiceClient = new BlobServiceClient(blobConnectionString);
+    var containerClient = blobServiceClient.GetBlobContainerClient("uploads");
+    containerClient.CreateIfNotExists(Azure.Storage.Blobs.Models.PublicAccessType.None);
+}
 
 Console.WriteLine("Connected to Azure SQL!");
 Console.WriteLine("SQL Connection String Loaded");
@@ -1104,17 +1115,17 @@ async (HttpRequest request) =>
     string targetGroupIdStr = form.ContainsKey("targetGroupId") ? form["targetGroupId"].ToString() : null;
     Guid? targetGroupId = !string.IsNullOrEmpty(targetGroupIdStr) ? Guid.Parse(targetGroupIdStr) : null;
 
-    string homeDir = Environment.GetEnvironmentVariable("HOME");
-    string uploadsFolder = string.IsNullOrEmpty(homeDir) 
-        ? Path.Combine(app.Environment.ContentRootPath, "Uploads") 
-        : Path.Combine(homeDir, "data", "Uploads");
-    
-    Directory.CreateDirectory(uploadsFolder);
-    var filePath = Path.Combine(uploadsFolder, file.FileName);
-
     using var memoryStream = new MemoryStream();
     await file.CopyToAsync(memoryStream);
     byte[] fileBytes = memoryStream.ToArray();
+    memoryStream.Position = 0;
+
+    if (blobServiceClient != null)
+    {
+        var containerClient = blobServiceClient.GetBlobContainerClient("uploads");
+        var blobClient = containerClient.GetBlobClient(file.FileName);
+        await blobClient.UploadAsync(memoryStream, overwrite: true);
+    }
     
     string fileHash = BitConverter.ToString(SHA256.HashData(fileBytes)).Replace("-", "").ToLowerInvariant();
 
@@ -1138,7 +1149,7 @@ async (HttpRequest request) =>
         }
     }
 
-    await File.WriteAllBytesAsync(filePath, fileBytes);
+    // Await file local writing is removed, fileBytes are used directly for parsing below.
 
     var documentChunksWithPages = new List<(string Text, int PageNumber)>();
     string text = "";
@@ -1148,7 +1159,7 @@ async (HttpRequest request) =>
     {
         if (extension == ".pdf")
         {
-            using (var pdf = PdfDocument.Open(filePath))
+            using (var pdf = PdfDocument.Open(fileBytes))
             {
                 int pageNum = 1;
                 foreach (var page in pdf.GetPages())
@@ -1165,13 +1176,14 @@ async (HttpRequest request) =>
         }
         else if (extension == ".txt" || extension == ".md" || extension == ".csv")
         {
-            text = await File.ReadAllTextAsync(filePath);
+            text = System.Text.Encoding.UTF8.GetString(fileBytes);
             var chunks = ChunkText(text);
             foreach (var c in chunks) documentChunksWithPages.Add((c, 1));
         }
         else if (extension == ".docx")
         {
-            using (WordprocessingDocument wordDoc = WordprocessingDocument.Open(filePath, false))
+            using (var wordStream = new MemoryStream(fileBytes))
+            using (WordprocessingDocument wordDoc = WordprocessingDocument.Open(wordStream, false))
             {
                 text = wordDoc.MainDocumentPart?.Document.Body?.InnerText ?? "";
                 var chunks = ChunkText(text);
@@ -1439,42 +1451,26 @@ app.MapGet("/download/{documentId:int}", async (int documentId, HttpContext cont
     if (fileNameObj == null) return Results.NotFound(new { error = "Document not found." });
     
     string fileName = fileNameObj.ToString();
-    string homeDir = Environment.GetEnvironmentVariable("HOME");
-    
-    // First try the new persistent path
-    string persistentFolder = string.IsNullOrEmpty(homeDir) 
-        ? Path.Combine(app.Environment.ContentRootPath, "Uploads") 
-        : Path.Combine(homeDir, "data", "Uploads");
-    string filePath = Path.Combine(persistentFolder, fileName);
-    
-    // If not found in persistent path, fallback to legacy wwwroot path
-    if (!System.IO.File.Exists(filePath))
-    {
-        string legacyFolder = Path.Combine(app.Environment.ContentRootPath, "Uploads");
-        string legacyPath = Path.Combine(legacyFolder, fileName);
-        
-        if (System.IO.File.Exists(legacyPath))
-        {
-            filePath = legacyPath; // Use the legacy path
-        }
-        else
-        {
-            Console.WriteLine("DOWNLOAD REQUESTED");
-            Console.WriteLine($"DOCUMENT ID: {documentId}");
-            Console.WriteLine($"FILE NAME: {fileName}");
-            Console.WriteLine($"EXPECTED PATH: {filePath} AND {legacyPath}");
-            Console.WriteLine($"FILE EXISTS?: NO");
-            return Results.NotFound(new { error = "File not found on disk.", path = filePath, fileName = fileName });
-        }
-    }
-    
+
     var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
     if (!provider.TryGetContentType(fileName, out var contentType))
     {
         contentType = "application/octet-stream";
     }
+
+    if (blobServiceClient != null)
+    {
+        var containerClient = blobServiceClient.GetBlobContainerClient("uploads");
+        var blobClient = containerClient.GetBlobClient(fileName);
+        
+        if (await blobClient.ExistsAsync())
+        {
+            var downloadInfo = await blobClient.DownloadAsync();
+            return Results.Stream(downloadInfo.Value.Content, contentType, fileName);
+        }
+    }
     
-    return Results.File(Path.GetFullPath(filePath), contentType, fileName);
+    return Results.NotFound(new { error = "File not found in blob storage.", fileName = fileName });
 });
 
 app.MapGet("/documents/health", async () =>

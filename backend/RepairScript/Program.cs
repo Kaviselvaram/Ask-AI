@@ -28,7 +28,7 @@ class RepairProgram
             return;
         }
 
-        string uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "Uploads");
+        string uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
         if (!Directory.Exists(uploadsPath))
         {
             Console.WriteLine($"ERROR: Uploads directory not found at {uploadsPath}");
@@ -90,6 +90,12 @@ class RepairProgram
             Console.WriteLine($"    - File: {file}");
         }
         
-        Console.WriteLine("\nAction required: If there are orphaned database entries, you should manually delete them from the database, or upload the missing files. If there are orphaned disk files, you can safely delete them from the Uploads folder to save space.");
+        Console.WriteLine("\nDOCUMENTS TABLE SCHEMA:");
+        using SqlCommand schemaCmd = new SqlCommand("SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Documents'", conn);
+        using SqlDataReader schemaReader = await schemaCmd.ExecuteReaderAsync();
+        while (await schemaReader.ReadAsync())
+        {
+            Console.WriteLine($"{schemaReader.GetString(0)} - {schemaReader.GetString(1)}");
+        }
     }
 }
