@@ -75,6 +75,7 @@ builder.Services.AddScoped<IVerificationService, VerificationService>();
 builder.Services.AddScoped<IAgent, ResearchAgent>();
 builder.Services.AddScoped<IAgent, ComparisonAgent>();
 builder.Services.AddScoped<IAgentOrchestrator, LightweightAgentOrchestrator>();
+builder.Services.AddScoped<IInsightEngine, InsightEngine>();
 
 //
 // AZURE OPENAI CONFIG
@@ -175,8 +176,10 @@ var chatService =
 // CHAT ENDPOINT
 //
 
+app.MapGet("/insights/health", () => Results.Ok(new { status = "healthy" }));
+
 app.MapPost("/chat",
-async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService, IAgentOrchestrator orchestrator) =>
+async (ChatRequest request, IIntentClassifier intentClassifier, RetrievalStrategyFactory strategyFactory, IPlannerService plannerService, IMemoryService memoryService, IVerificationService verificationService, IAgentOrchestrator orchestrator, IInsightEngine insightEngine) =>
 {
     var overallStopwatch = System.Diagnostics.Stopwatch.StartNew();
     try
@@ -692,6 +695,49 @@ User Query:
             }
         }
         Console.WriteLine($"LLM RESPONSE GENERATED: {fullResponse.Length} chars");
+    }
+
+    // Feature 5: Insight Engine (Phase 6)
+    string insightsEnabledStr = Environment.GetEnvironmentVariable("Insights:Enabled") ?? "true";
+    bool isInsightsEnabled = bool.TryParse(insightsEnabledStr, out bool parsedIns) ? parsedIns : true;
+
+    var insightKeywords = new[] { "analyze", "insight", "patterns", "themes", "contradiction", "gaps", "duplicates" };
+    bool needsInsights = insightKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
+
+    if (isInsightsEnabled && needsInsights)
+    {
+        try
+        {
+            using var ctsInsight = new CancellationTokenSource(TimeSpan.FromMilliseconds(1000));
+            var insightResult = await insightEngine.AnalyzeAsync(context, ctsInsight.Token);
+            
+            if (insightResult != null && insightResult.Confidence > 0)
+            {
+                string insightsText = "\n\n--- Insights ---\n";
+                if (insightResult.Themes?.Count > 0) insightsText += $"Themes:\n- {string.Join("\n- ", insightResult.Themes)}\n\n";
+                if (insightResult.Contradictions?.Count > 0) insightsText += $"Contradictions:\n- {string.Join("\n- ", insightResult.Contradictions)}\n\n";
+                if (insightResult.Gaps?.Count > 0) insightsText += $"Gaps:\n- {string.Join("\n- ", insightResult.Gaps)}\n\n";
+                if (insightResult.Duplicates?.Count > 0) insightsText += $"Duplicates:\n- {string.Join("\n- ", insightResult.Duplicates)}\n\n";
+
+                if (string.IsNullOrEmpty(fullResponse))
+                {
+                    fullResponse = insightsText.Trim();
+                }
+                else
+                {
+                    fullResponse += insightsText;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("INSIGHT ENGINE FAILED: Timeout");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("INSIGHT ENGINE FAILED");
+            Console.WriteLine($"[Insight Engine Error]: {ex.Message}");
+        }
     }
 
     // Feature 4: Verification Intelligence Layer

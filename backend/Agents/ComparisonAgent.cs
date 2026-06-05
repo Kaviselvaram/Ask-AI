@@ -67,3 +67,5 @@ public class ComparisonAgent : IAgent
         return new AgentResult(Name, "Comparison could not be completed.", 0.0);
     }
 }
+
+
