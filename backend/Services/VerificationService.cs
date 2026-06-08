@@ -21,9 +21,6 @@ public class VerificationService : IVerificationService
     {
         string promptTemplate = await File.ReadAllTextAsync("Prompts/VerificationPrompt.txt", cancellationToken);
         
-        var arguments = new KernelArguments()
-        {
-            ["answer"] = answer,
         var promptSettings = new Microsoft.SemanticKernel.Connectors.OpenAI.OpenAIPromptExecutionSettings
         {
             ResponseFormat = typeof(VerificationResult),
