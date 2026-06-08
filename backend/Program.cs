@@ -670,7 +670,7 @@ Knowledge Base Context & Evidence:
 
 User Query:
 
-{request.message}
+{rewrittenQuery}
 ");
 
 
@@ -681,13 +681,13 @@ User Query:
     string insightsEnabledStr = Environment.GetEnvironmentVariable("Insights:Enabled") ?? "true";
     bool isInsightsEnabled = bool.TryParse(insightsEnabledStr, out bool parsedIns) ? parsedIns : true;
     var insightKeywords = new[] { "analyze", "insight", "patterns", "themes", "contradiction", "gaps", "duplicates" };
-    bool needsInsights = insightKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
+    bool needsInsights = insightKeywords.Any(k => rewrittenQuery.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
     
     var workspaceKeywords = new[] { "workspace", "vault", "what documents", "everything related to", "documents are related", "summarize my", "main topics" };
-    bool needsWorkspace = workspaceKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
+    bool needsWorkspace = workspaceKeywords.Any(k => rewrittenQuery.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
     
     var researchKeywords = new[] { "analyze", "evaluate", "investigate", "assess", "review", "identify risks", "identify opportunities", "recommendations", "strengths and weaknesses", "executive report" };
-    bool needsResearchDirector = researchKeywords.Any(k => request.message.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
+    bool needsResearchDirector = researchKeywords.Any(k => rewrittenQuery.ToLowerInvariant().Contains(k) || intent.ToString().ToLowerInvariant().Contains(k));
     string wceEnabledStr = Environment.GetEnvironmentVariable("WorkspaceIntelligence:Enabled") ?? "true";
     string rdEnabledStr = Environment.GetEnvironmentVariable("RESEARCH_DIRECTOR_ENABLED") ?? "true";
     bool isWorkspaceIntelligenceEnabled = bool.TryParse(wceEnabledStr, out bool wceParsed) ? wceParsed : true;
@@ -710,7 +710,7 @@ User Query:
             foreach(var s in sources) { Console.WriteLine($"- {s.FileName}"); }
             
             var agentContext = new AgentContext(
-                Query: request.message,
+                Query: rewrittenQuery,
                 Intent: intent.ToString(),
                 ExecutionPlan: plan,
                 RetrievedContext: context,
@@ -778,9 +778,9 @@ User Query:
             // Override context so Verification can verify against the full vault context
             context = vaultContext;
             
-            using var ctsInsight = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var ctsInsight = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             Console.WriteLine("INSIGHT ENGINE STARTED");
-            var insightResult = await insightEngine.AnalyzeAsync(vaultContext, request.message, ctsInsight.Token);
+            var insightResult = await insightEngine.AnalyzeAsync(vaultContext, rewrittenQuery, ctsInsight.Token);
             Console.WriteLine("INSIGHT ENGINE COMPLETED");
             
             if (insightResult != null && insightResult.Confidence > 0)
@@ -823,8 +823,8 @@ User Query:
     {
         try
         {
-            using var ctsWorkspace = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            var workspaceResult = await workspaceService.ProcessWorkspaceRequestAsync(connectionString, request.message, ctsWorkspace.Token);
+            using var ctsWorkspace = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            var workspaceResult = await workspaceService.ProcessWorkspaceRequestAsync(connectionString, rewrittenQuery, ctsWorkspace.Token);
 
             sources = workspaceResult.AnalyzedSources;
             
@@ -883,7 +883,7 @@ User Query:
         try
         {
             using var ctsResearch = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            var researchResult = await researchDirector.ExecuteResearchAsync(connectionString, request.message, conversationHistory, ctsResearch.Token);
+            var researchResult = await researchDirector.ExecuteResearchAsync(connectionString, rewrittenQuery, conversationHistory, ctsResearch.Token);
 
             sources = researchResult.Sources;
             var researchPlan = researchResult.Plan;
@@ -990,14 +990,14 @@ User Query:
             string nameWithoutExt = Path.GetFileNameWithoutExtension(src.FileName);
             string[] nameParts = nameWithoutExt.Split(new[] { ' ', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
             
-            bool isExplicitlyTargeted = request.message.Contains(src.FileName, StringComparison.OrdinalIgnoreCase) || 
-                                        request.message.Contains(nameWithoutExt, StringComparison.OrdinalIgnoreCase);
+            bool isExplicitlyTargeted = rewrittenQuery.Contains(src.FileName, StringComparison.OrdinalIgnoreCase) || 
+                                        rewrittenQuery.Contains(nameWithoutExt, StringComparison.OrdinalIgnoreCase);
             
             bool isExplicitlyCited = finalAnswer.Contains(src.FileName, StringComparison.OrdinalIgnoreCase) || 
                                      finalAnswer.Contains(nameWithoutExt, StringComparison.OrdinalIgnoreCase);
 
             bool isPartiallyTargeted = nameParts.Length > 0 && nameParts.Any(p => p.Length > 3 && 
-                (request.message.Contains(p, StringComparison.OrdinalIgnoreCase) || finalAnswer.Contains(p, StringComparison.OrdinalIgnoreCase)));
+                (rewrittenQuery.Contains(p, StringComparison.OrdinalIgnoreCase) || finalAnswer.Contains(p, StringComparison.OrdinalIgnoreCase)));
 
             if (isExplicitlyTargeted || isExplicitlyCited || isPartiallyTargeted)
             {
@@ -1049,7 +1049,7 @@ User Query:
 
         insertCommand.Parameters.AddWithValue(
             "@Question",
-            request.message
+            rewrittenQuery
         );
 
         insertCommand.Parameters.AddWithValue(

@@ -103,10 +103,10 @@ public class ResearchEvidenceCollector : IResearchEvidenceCollector
         {
             var uniqueChunks = group.Select(c => c.Text).Distinct().ToList(); // Deduplicate evidence
             
-            // Research Requirement: minimum 3 chunks per relevant document, OR the document is explicitly named in the query
+            // Research Requirement: minimum 1 chunk per relevant document, OR the document is explicitly named in the query
             bool isExplicitlyNamed = queryWords.Any(w => group.Key.FileName.ToLowerInvariant().Contains(w));
             
-            if (uniqueChunks.Count >= 3 || isExplicitlyNamed)
+            if (uniqueChunks.Count >= 1 || isExplicitlyNamed)
             {
                 finalGroupedChunks[group.Key.FileName] = uniqueChunks;
                 totalValidChunks += uniqueChunks.Count;
@@ -126,7 +126,7 @@ public class ResearchEvidenceCollector : IResearchEvidenceCollector
         Console.WriteLine($"EVIDENCE ITEMS COLLECTED: {totalValidChunks}");
 
         // 4. Verify Total Evidence Count
-        if (totalValidChunks < 3 || sources.Count == 0)
+        if (totalValidChunks < 1 || sources.Count == 0)
         {
             return ("", new List<SourceInfo>(), false);
         }

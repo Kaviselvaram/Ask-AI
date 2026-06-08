@@ -27,6 +27,7 @@ function App() {
 
   // Document Vault Ingestion states
   const [documents, setDocuments] = useState([]);
+  const [vaultLoading, setVaultLoading] = useState(true);
   const [uploadingState, setUploadingState] = useState(null); // 'uploading' | 'extracting' | 'chunking' | 'embeddings' | 'storing' | 'ready' | null
   const [uploadedFileDetails, setUploadedFileDetails] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -53,10 +54,13 @@ function App() {
 
   const fetchDocuments = async () => {
     try {
+      setVaultLoading(true);
       const res = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/documents`);
       setDocuments(res.data);
     } catch (err) {
       console.error("Error fetching documents:", err);
+    } finally {
+      setVaultLoading(false);
     }
   };
 
@@ -364,7 +368,11 @@ function App() {
                 <span>Vault</span>
               </h2>
               <div className="document-list">
-                {documents.length === 0 ? (
+                {vaultLoading ? (
+                  <div className="empty-vault-text">
+                    Connecting to Vault...
+                  </div>
+                ) : documents.length === 0 ? (
                   <div className="empty-vault-text">
                     No documents uploaded.
                   </div>
