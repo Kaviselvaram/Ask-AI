@@ -29,18 +29,18 @@ public class ComparisonAgent : IAgent
 
         string promptTemplate = await File.ReadAllTextAsync("Prompts/ComparisonAgentPrompt.txt", cancellationToken);
         
-        var arguments = new KernelArguments()
-        {
-            ["query"] = context.Query,
-            ["context"] = context.RetrievedContext,
-            ["previous_output"] = context.PreviousAgentOutput
-        };
-
         var promptSettings = new Microsoft.SemanticKernel.Connectors.OpenAI.OpenAIPromptExecutionSettings
         {
             ResponseFormat = typeof(AgentResult),
             Temperature = 0.2, 
             MaxTokens = 1500
+        };
+
+        var arguments = new KernelArguments(promptSettings)
+        {
+            ["query"] = context.Query,
+            ["context"] = context.RetrievedContext,
+            ["previous_output"] = context.PreviousAgentOutput
         };
 
         var result = await _kernel.InvokePromptAsync(promptTemplate, arguments, templateFormat: "semantic-kernel", cancellationToken: cancellationToken);

@@ -24,14 +24,17 @@ public class VerificationService : IVerificationService
         var arguments = new KernelArguments()
         {
             ["answer"] = answer,
-            ["context"] = retrievedContext
-        };
-
         var promptSettings = new Microsoft.SemanticKernel.Connectors.OpenAI.OpenAIPromptExecutionSettings
         {
             ResponseFormat = typeof(VerificationResult),
             Temperature = 0.1, // Low temperature for factual verification
             MaxTokens = 1000
+        };
+
+        var arguments = new KernelArguments(promptSettings)
+        {
+            ["answer"] = answer,
+            ["context"] = retrievedContext
         };
 
         var result = await _kernel.InvokePromptAsync(promptTemplate, arguments, templateFormat: "semantic-kernel", cancellationToken: cancellationToken);
